@@ -1,20 +1,32 @@
-# pesterm — Setup & one-time grants (Phase 1)
+# pesterm — Setup & one-time grants
 
-This documents the human-interactive steps that pesterm cannot perform for you, plus
-the supported Claude Code hook wiring. Build the app first:
+This documents the install flow and the human-interactive steps that pesterm cannot
+perform for you.
+
+## Install
 
 ```sh
-scripts/build-app.sh        # produces ./pesterm.app (ad-hoc signed)
+scripts/install.sh
 ```
 
-Then move `pesterm.app` to a stable location (e.g. `~/Applications/pesterm.app`) so
-its bundle identity stays put.
+The installer builds the bundle, places it under `$PREFIX/share/pesterm`
+(default `PREFIX=$HOME/.local`, override with `PESTERM_PREFIX`), writes the
+`$PREFIX/bin/pesterm` CLI entry, verifies the bundle identity through it, and
+**self-wires the Claude Code hook for you** — no manual `~/.claude/settings.json`
+editing required. See [README.md](./README.md#install) for the full step list.
+
+After installing, **restart Claude Code** so it reloads `~/.claude/settings.json`,
+then verify with:
+
+```sh
+pesterm status
+```
 
 ## One-time human setup (REQUIRED — pesterm cannot do these for you)
 
 1. **Notification style = Alerts.** Banners auto-dismiss and kill the click, so the
    reveal never fires. After the first post registers pesterm, open
-   **System Settings -> Notifications -> pesterm** and set the style to **Alerts**.
+   **System Settings → Notifications → pesterm** and set the style to **Alerts**.
    (There is no `requestAuthorization` call in the NSUserNotification path — the
    signed bundle self-registers on its first post.)
 
@@ -23,14 +35,18 @@ its bundle identity stays put.
    shows a one-time **"pesterm wants to control iTerm2"** prompt. Click **OK**. This
    prompt only appears because the bundle carries `NSAppleEventsUsageDescription`. If
    you deny it, reveal will be blocked until you re-enable pesterm under
-   **System Settings -> Privacy & Security -> Automation**.
+   **System Settings → Privacy & Security → Automation**.
 
-## Claude Code hook wiring (supported invocation: the INNER binary)
+## Claude Code hook wiring (done for you by the installer)
 
-Call the inner binary directly (NOT `open pesterm.app --args`). It posts under the
-bundle identity because the binary lives inside the signed bundle.
+`scripts/install.sh` runs the equivalent of:
 
-Add to `~/.claude/settings.json` (adjust the path to where you placed the app):
+```sh
+pesterm wire claude --yes --command-path "$PREFIX/bin/pesterm"
+```
+
+which idempotently merges this single matcher-less entry into
+`~/.claude/settings.json`, preserving every unrelated hook:
 
 ```json
 {
@@ -40,7 +56,7 @@ Add to `~/.claude/settings.json` (adjust the path to where you placed the app):
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/Applications/pesterm.app/Contents/MacOS/pesterm --adapter claude"
+            "command": "$HOME/.local/bin/pesterm --adapter claude"
           }
         ]
       }
@@ -49,9 +65,36 @@ Add to `~/.claude/settings.json` (adjust the path to where you placed the app):
 }
 ```
 
-No per-event `matcher` entries are needed — the adapter branches on
-`notification_type` itself (`permission_prompt` / `idle_prompt` / `elicitation_dialog`;
-`auth_success` and any unknown type are suppressed for prototype parity).
+The hook command is the stable `$PREFIX/bin/pesterm` path (a `bash` `exec` wrapper
+that runs the inner bundle binary, so notifications post under the bundle identity —
+a bare symlink would NOT). No per-event `matcher` entries are needed — the adapter
+branches on `notification_type` itself (`permission_prompt` / `idle_prompt` /
+`elicitation_dialog`; `auth_success` and any unknown type are suppressed for prototype
+parity).
+
+To wire/unwire by hand, or to point at a different settings file:
+
+```sh
+pesterm wire claude                              # interactive confirm
+pesterm wire claude --yes                         # no prompt
+pesterm wire claude --settings /path/to/settings.json
+pesterm unwire claude --yes                        # removes ONLY pesterm's entry
+```
+
+In a non-TTY (e.g. CI) without `--yes`, `wire`/`unwire` print the `--yes` re-run hint
+and exit without touching anything — they never hang. A malformed settings file is
+refused (non-zero exit, file untouched). A backup
+(`settings.json.bak-YYYYMMDD-HHMMSS`) is written only when content actually changes.
+
+## Verify
+
+```sh
+pesterm status
+```
+
+reports the bundle install path, the CLI entry + on-`PATH` state, the wired state for
+each supported agent (with the command path and a **stale** flag if that path no
+longer exists), the running process's bundle identity, and the manual-grant reminders.
 
 ## Event mapping (parity with the bash prototype)
 
@@ -66,3 +109,20 @@ No per-event `matcher` entries are needed — the adapter branches on
 Title is always `Claude Code`; subtitle is the basename of `cwd`; the coalescing group
 is `claude-<iTerm2 session id>` where the session id is the LAST colon-component of the
 inherited `ITERM_SESSION_ID` (never the agent payload).
+
+## Known wrinkles
+
+1. **Alerts style is mandatory** (grant #1 above) — banners kill the click.
+2. **One-time iTerm2 control grant** (grant #2 above).
+3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle cdhash, so a
+   rebuild + reinstall changes the hash and re-triggers the "control iTerm2" prompt.
+   Expected until Phase 5 (real Developer ID signing + notarization) lands. The
+   installer always signs LAST and runs `codesign --verify --deep --strict`, so a
+   broken/partial signature never ships to confuse TCC further.
+
+## Future work
+
+- Homebrew formula.
+- Phase 3 adapters: Codex, Gemini CLI, Antigravity (additive `HookWriter`
+  conformances — no merger or CLI changes).
+- Phase 5: real signing + notarization.

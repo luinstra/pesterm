@@ -35,8 +35,25 @@ private func buildRequestAndRevealer() -> (NotificationRequest, TerminalRevealer
             RootCommand.main(["--help"])
             exit(0)
         }
-        // Anything else (e.g. ArgumentParser's HelpCommand from `--help`): let
-        // ArgumentParser run it so it prints help/usage, then exit cleanly.
+        // Fallthrough for PURE-CLI subcommands and ArgumentParser's own commands.
+        //
+        // The wire/unwire/status subcommands intentionally run-and-exit HERE: their
+        // real work lives in `run()` and they call `exit()` themselves before this
+        // line ever returns. They fail the `post` and bare-`RootCommand` checks above,
+        // so they land here and execute BEFORE any NSApplication is constructed — they
+        // must NEVER spin the AppKit run loop. `post` is handled in its own branch
+        // above precisely because its `run()` is a no-op (it only builds a request),
+        // and it needs AppKit to actually deliver the notification.
+        //
+        // GUARD NOTE: any FUTURE subcommand that NEEDS AppKit (i.e. must post a
+        // notification) CANNOT reuse this fallthrough as-is. It would `run()` and
+        // exit(0) here, never reaching `app.run()` below, so the notification would
+        // never deliver. Such a command must be routed through the request-building
+        // path (like `post`): add an explicit `if let X = parsed as? FooCommand`
+        // branch above that returns a (request, revealer) instead of running here.
+        //
+        // This also handles ArgumentParser's HelpCommand from `--help`: it prints
+        // usage and exits cleanly.
         try parsed.run()
         exit(0)
     } catch {

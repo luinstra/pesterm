@@ -21,5 +21,8 @@ DerivedData/
 # Crew (local working context, not for the repo)
 .crew/
 
+# Claude Octopus tool state (provider/session metadata, not for the repo)
+.claude-octopus/
+
 # Claude Code per-user local settings (the .local suffix means personal, not shared)
 .claude/settings.local.json
