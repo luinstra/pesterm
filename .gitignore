@@ -1,7 +1,11 @@
 # SwiftPM
 .build/
 .swiftpm/
-Package.resolved
+# Package.resolved IS tracked — we have a real dependency (swift-argument-parser)
+# and committing the resolved versions locks the build for anyone cloning this.
+
+# Build artifact assembled by scripts/build-app.sh
+pesterm.app/
 
 # Xcode
 *.xcodeproj/
@@ -16,3 +20,6 @@ DerivedData/
 
 # Crew (local working context, not for the repo)
 .crew/
+
+# Claude Code per-user local settings (the .local suffix means personal, not shared)
+.claude/settings.local.json
