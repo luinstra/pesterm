@@ -132,3 +132,7 @@ rm -rf "$HOME/.local/share/pesterm/pesterm.app" "$HOME/.local/bin/pesterm"
 - Phase 3 adapters: Codex, Gemini CLI, Antigravity — each is an additive
   `HookWriter` conformance; the merger and CLI don't change.
 - Phase 5: real Developer ID signing + notarization (fixes wrinkle #3).
+
+## License
+
+[MIT](./LICENSE) © luinstra
