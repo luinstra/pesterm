@@ -21,16 +21,21 @@ final class NSUserNotificationBackend: NSObject, NotificationBackend, NSUserNoti
     // The backend retains itself as the center delegate for the process lifetime;
     // it is also retained by the app delegate. Both keep it alive across the run loop.
 
-    func post(_ request: NotificationRequest, onActivate: @escaping () -> Void) throws {
-        self.onActivate = onActivate
-
-        let center = NSUserNotificationCenter.default
-        center.delegate = self
-
+    /// PURE: build the NSUserNotification for a request. No delivery, no delegate, no
+    /// timer — pulled out so the banner's shape (title/subtitle/sound/identifier and the
+    /// hasActionButton = false rule) is unit-testable without posting.
+    ///
+    /// `hasActionButton` defaults to true, which makes macOS add a default "Show" button.
+    /// We don't want it — the whole banner body is already a click target
+    /// (`.contentsClicked` → didActivate → reveal), so the button is redundant clutter.
+    /// Killing it makes "click anywhere" the only affordance; the hover Close (✕) still
+    /// dismisses-without-reveal via didDismissAlert.
+    static func makeNotification(from request: NotificationRequest) -> NSUserNotification {
         let notification = NSUserNotification()
         notification.title = request.title
         notification.subtitle = request.subtitle
         notification.informativeText = request.body
+        notification.hasActionButton = false
         if let sound = request.sound {
             notification.soundName = sound
         }
@@ -39,6 +44,16 @@ final class NSUserNotificationBackend: NSObject, NotificationBackend, NSUserNoti
         if let groupID = request.groupID {
             notification.identifier = groupID
         }
+        return notification
+    }
+
+    func post(_ request: NotificationRequest, onActivate: @escaping () -> Void) throws {
+        self.onActivate = onActivate
+
+        let center = NSUserNotificationCenter.default
+        center.delegate = self
+
+        let notification = Self.makeNotification(from: request)
 
         self.deliveredNotification = notification
         center.deliver(notification)
