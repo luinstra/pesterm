@@ -34,22 +34,21 @@ struct ClaudeHookWriter: HookWriter {
         return false
     }
 
-    /// `{"hooks":[{"type":"command","command":"'<command>' --adapter claude"}]}`.
+    /// `{"hooks":[{"type":"command","command":"<command> --adapter claude"}]}`.
     /// Matcher-less by design (the adapter branches on `notification_type` itself).
-    /// The executable path is POSIX single-quoted so install prefixes containing
-    /// spaces (e.g. `/Users/Jane Doe/.local/bin/pesterm`) — or shell metacharacters
-    /// like `$`, backticks, `"`, `\` — survive the hook runner WITHOUT any shell
-    /// evaluation/expansion. `isMine` matches the `--adapter claude` substring, which
-    /// quoting the path leaves intact, so prior unquoted/double-quoted entries are
-    /// still detected/replaced.
+    /// The command (and any `--sound` value) is single-quoted ONLY when it needs it: a
+    /// path containing spaces or shell metacharacters (`$`, backticks, `"`, `\`) is
+    /// quoted so it survives the hook runner WITHOUT any shell evaluation, while a bare
+    /// command name like `pesterm` (wired when `$PREFIX/bin` is on PATH) is left clean
+    /// and unquoted. `isMine` matches the `--adapter claude` substring regardless of
+    /// quoting, so prior quoted/unquoted entries are still detected/replaced.
     ///
-    /// When `sound` is non-nil the command gains a trailing `--sound '<name>'` (the name
-    /// is single-quoted with the same POSIX rule as the path), overriding the per-event
-    /// default sounds for whatever events this entry handles.
+    /// When `sound` is non-nil the command gains a trailing `--sound <name>`, quoted by
+    /// the same rule, overriding the per-event default sounds for this entry's events.
     func makeEntry(command: String, sound: String?) -> [String: Any] {
-        var cmd = "\(Self.shellQuote(command)) \(Self.adapterFlag)"
+        var cmd = "\(Self.shellArg(command)) \(Self.adapterFlag)"
         if let sound = sound, !sound.isEmpty {
-            cmd += " --sound \(Self.shellQuote(sound))"
+            cmd += " --sound \(Self.shellArg(sound))"
         }
         return [
             "hooks": [
@@ -59,6 +58,19 @@ struct ClaudeHookWriter: HookWriter {
                 ]
             ]
         ]
+    }
+
+    /// Render `value` for the hook command string, quoting only when necessary. A value
+    /// made up solely of shell-safe characters (letters, digits, and `._-`) — i.e. a
+    /// bare command name like `pesterm` — is emitted as-is. Anything else (a path, since
+    /// `/` is treated as unsafe here, or any spaces/metacharacters) is POSIX
+    /// single-quoted via `shellQuote`.
+    static func shellArg(_ value: String) -> String {
+        let safe = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+        if !value.isEmpty && value.allSatisfy({ safe.contains($0) }) {
+            return value
+        }
+        return shellQuote(value)
     }
 
     /// POSIX single-quote a path for a shell command string. Single quotes suppress

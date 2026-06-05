@@ -141,8 +141,30 @@ struct StatusCommand: ParsableCommand {
 
     /// The hook command is `'<path>' --adapter claude` (path is single-quoted; older
     /// entries may be double-quoted or unquoted). Flag stale if `<path>` is gone.
+    ///
+    /// `<path>` may be either an absolute/relative filesystem path (the installer pins
+    /// `$PREFIX/bin/pesterm` when that dir is NOT on PATH) OR a bare command name (the
+    /// installer wires just `pesterm` when `$PREFIX/bin` IS on PATH). A bare name is
+    /// resolved against `$PATH` the way the shell would; checking it with `fileExists`
+    /// would wrongly report it stale.
     private static func commandPathMissing(_ command: String) -> Bool {
-        return !FileManager.default.fileExists(atPath: commandPath(command))
+        let path = commandPath(command)
+        if path.contains("/") {
+            return !FileManager.default.fileExists(atPath: path)
+        }
+        return !resolvesOnPath(path)
+    }
+
+    /// True iff `name` resolves to an executable file on `$PATH` (shell `command -v`
+    /// semantics). Used to validate a bare-name hook command.
+    static func resolvesOnPath(_ name: String) -> Bool {
+        let raw = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let fm = FileManager.default
+        for dir in raw.split(separator: ":", omittingEmptySubsequences: true) {
+            let candidate = (String(dir) as NSString).appendingPathComponent(name)
+            if fm.isExecutableFile(atPath: candidate) { return true }
+        }
+        return false
     }
 
     /// Extract the executable path from a hook command string. Current form is a

@@ -172,23 +172,18 @@ case "$GOT_PATH" in
 esac
 echo "    identity OK: $GOT_ID @ $GOT_PATH"
 
-# 9. Self-wire the Claude Code hook, pinning the stable bin/ path.
+# 9. Decide how to reference pesterm in the hook, based on PATH.
 #
-#   NOTE: NSHomeDirectory() resolves the real user home via getpwuid() and IGNORES
-#   $HOME for a non-sandboxed binary, so `wire` always targets the real
-#   ~/.claude/settings.json by default. For a SAFE install dry-run against a temp
-#   settings file, set PESTERM_SETTINGS to redirect the wire target (test-only; unset
-#   in normal use so production wires the real file).
-echo "==> Wiring Claude Code hook (--command-path $SYMLINK)"
-if [[ -n "${PESTERM_SETTINGS:-}" ]]; then
-    echo "    (PESTERM_SETTINGS set → wiring into $PESTERM_SETTINGS instead of ~/.claude/settings.json)"
-    "$SYMLINK" wire claude --yes --command-path "$SYMLINK" --settings "$PESTERM_SETTINGS"
-else
-    "$SYMLINK" wire claude --yes --command-path "$SYMLINK"
-fi
-
-# 10. PATH check (normalized).
-echo "==> Checking PATH"
+#   If $BIN_DIR is already on PATH, bake the BARE command name `pesterm` into the hook
+#   instead of the absolute $PREFIX/bin path. It resolves via PATH to this same exec
+#   wrapper (so bundle identity is preserved — the wrapper still execs the inner binary),
+#   and it keeps the settings entry relocatable / less machine-specific. If $BIN_DIR is
+#   NOT on PATH, pin the absolute $SYMLINK so the hook fires regardless of PATH.
+#
+#   Caveat: hooks run in Claude Code's process environment. This uses the PATH of the
+#   shell that ran install.sh as the proxy for it — normally the same login-shell PATH,
+#   but if Claude Code launches with a narrower PATH that omits $BIN_DIR, re-run with
+#   $BIN_DIR off PATH (or just re-install) to fall back to the absolute pin.
 norm() {
     local p
     p="$(cd "$1" 2>/dev/null && pwd -P || echo "$1")"
@@ -205,13 +200,39 @@ for entry in "${PATH_ENTRIES[@]}"; do
         break
     fi
 done
+if [[ "$ON_PATH" -eq 1 ]]; then
+    CMD_PATH="$BIN_NAME"
+else
+    CMD_PATH="$SYMLINK"
+fi
+
+# Self-wire the Claude Code hook.
+#
+#   NOTE: NSHomeDirectory() resolves the real user home via getpwuid() and IGNORES
+#   $HOME for a non-sandboxed binary, so `wire` always targets the real
+#   ~/.claude/settings.json by default. For a SAFE install dry-run against a temp
+#   settings file, set PESTERM_SETTINGS to redirect the wire target (test-only; unset
+#   in normal use so production wires the real file). We always INVOKE wire through the
+#   known-good $SYMLINK; only the baked --command-path value varies.
+echo "==> Wiring Claude Code hook (--command-path $CMD_PATH)"
+if [[ -n "${PESTERM_SETTINGS:-}" ]]; then
+    echo "    (PESTERM_SETTINGS set → wiring into $PESTERM_SETTINGS instead of ~/.claude/settings.json)"
+    "$SYMLINK" wire claude --yes --command-path "$CMD_PATH" --settings "$PESTERM_SETTINGS"
+else
+    "$SYMLINK" wire claude --yes --command-path "$CMD_PATH"
+fi
+
+# 10. PATH report (ON_PATH already computed in step 9).
+echo "==> Checking PATH"
 if [[ "$ON_PATH" -eq 0 ]]; then
     echo "    $BIN_DIR is NOT on your PATH. Add this to your shell profile:"
     echo
     echo "      export PATH=\"$BIN_DIR:\$PATH\""
     echo
+    echo "    (The hook is pinned to the absolute path $SYMLINK, so it fires regardless;"
+    echo "     adding $BIN_DIR to PATH also lets you run \`pesterm\` directly.)"
 else
-    echo "    $BIN_DIR is on PATH."
+    echo "    $BIN_DIR is on PATH — wired the hook as the bare command \`$BIN_NAME\`."
 fi
 
 # 11. Manual GUI grants.

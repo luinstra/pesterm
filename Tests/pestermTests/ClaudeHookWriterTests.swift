@@ -239,7 +239,8 @@ final class ClaudeHookWriterTests: XCTestCase {
         XCTAssertTrue(cmd.hasPrefix("'"), "command must open with a single quote")
     }
 
-    // 12. wire with --sound appends a single-quoted --sound <name> to the command.
+    // 12. wire with --sound appends --sound <name>; a path stays quoted, a plain sound
+    //     name (no metacharacters) is left unquoted.
     func testWireWithSoundOverride() throws {
         let current = try SettingsMerger.load(path: path())
         let merged = try SettingsMerger.upsert(current, event: writer.hookEvent,
@@ -248,7 +249,7 @@ final class ClaudeHookWriterTests: XCTestCase {
         try SettingsMerger.write(merged, to: path())
         let s = try SettingsMerger.load(path: path())
         XCTAssertEqual(commands(in: notificationEntries(s)),
-                       ["'/bin/pesterm' --adapter claude --sound 'Glass'"])
+                       ["'/bin/pesterm' --adapter claude --sound Glass"])
     }
 
     // 13. no sound → no --sound suffix (defaults apply). isMine still matches it.
@@ -263,6 +264,26 @@ final class ClaudeHookWriterTests: XCTestCase {
     func testSoundEntryIsMine() {
         let entry = writer.makeEntry(command: "/bin/pesterm", sound: "Glass")
         XCTAssertTrue(writer.isMine(entry))
+    }
+
+    // 15. a BARE command name (no slash, on PATH) is wired UNQUOTED, and is still ours.
+    func testBareCommandNameIsUnquoted() throws {
+        let s = try wire(path(), command: "pesterm")
+        let entries = notificationEntries(s)
+        XCTAssertEqual(commands(in: entries), ["pesterm --adapter claude"])
+        XCTAssertTrue(writer.isMine(entries[0]))
+    }
+
+    // 16. shellArg quotes paths/metacharacters but leaves a bare safe token alone.
+    func testShellArgQuotesOnlyWhenNeeded() {
+        XCTAssertEqual(ClaudeHookWriter.shellArg("pesterm"), "pesterm")
+        XCTAssertEqual(ClaudeHookWriter.shellArg("Glass"), "Glass")
+        XCTAssertEqual(ClaudeHookWriter.shellArg("my-tool_v2.bin"), "my-tool_v2.bin")
+        // A slash means "path" → quoted (defensive, even when otherwise safe).
+        XCTAssertEqual(ClaudeHookWriter.shellArg("/bin/pesterm"), "'/bin/pesterm'")
+        // Spaces / metacharacters → quoted.
+        XCTAssertEqual(ClaudeHookWriter.shellArg("two words"), "'two words'")
+        XCTAssertEqual(ClaudeHookWriter.shellArg("a$b"), "'a$b'")
     }
 
     // Registry sanity.

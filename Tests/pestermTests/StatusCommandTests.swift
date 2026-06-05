@@ -85,6 +85,45 @@ final class StatusCommandTests: XCTestCase {
         XCTAssertTrue(StatusCommand.leadsIntoBundle(target))
     }
 
+    // resolvesOnPath finds a bare command name that exists+executable in a $PATH dir.
+    // This is what keeps a bare-name hook (wired when $PREFIX/bin is on PATH) from
+    // being reported STALE by `status`.
+    func testResolvesOnPathFindsExecutable() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pesterm-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let exe = dir.appendingPathComponent("pesterm")
+        try "#!/bin/bash\n".write(to: exe, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: exe.path)
+
+        let saved = ProcessInfo.processInfo.environment["PATH"]
+        setenv("PATH", dir.path, 1)
+        defer { setenv("PATH", saved ?? "", 1) }
+
+        XCTAssertTrue(StatusCommand.resolvesOnPath("pesterm"))
+        XCTAssertFalse(StatusCommand.resolvesOnPath("definitely-not-a-real-cmd-xyz"))
+    }
+
+    // A non-executable file by that name does NOT count as resolved.
+    func testResolvesOnPathRejectsNonExecutable() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pesterm-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("pesterm")
+        try "x".write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+
+        let saved = ProcessInfo.processInfo.environment["PATH"]
+        setenv("PATH", dir.path, 1)
+        defer { setenv("PATH", saved ?? "", 1) }
+
+        XCTAssertFalse(StatusCommand.resolvesOnPath("pesterm"))
+    }
+
     // binEntryTarget resolves a symlink (legacy layout).
     func testBinEntryTargetResolvesSymlink() throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
