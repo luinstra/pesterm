@@ -19,6 +19,16 @@
 
 #import "include/iTermBridge.h"
 
+// These @implementation blocks are INTENTIONALLY empty (see file header): every method —
+// whether declared directly on the interface or inherited from the generated
+// iTermBridgeGenericMethods protocol — is provided dynamically by ScriptingBridge at
+// runtime, not here. -Wincomplete-implementation and -Wprotocol flag exactly that
+// "declared but not implemented" shape, so silence both for just these stub blocks — a
+// scoped pragma, not a blanket flag, so nothing else is hidden.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincomplete-implementation"
+#pragma clang diagnostic ignored "-Wprotocol"
+
 @implementation iTermBridgeApplication
 @end
 
@@ -30,6 +40,8 @@
 
 @implementation iTermBridgeSession
 @end
+
+#pragma clang diagnostic pop
 
 /*
  * pesterm_reveal_iterm_session — the actual reveal traversal, done in Objective-C.
