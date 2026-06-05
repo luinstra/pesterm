@@ -110,6 +110,32 @@ Title is always `Claude Code`; subtitle is the basename of `cwd`; the coalescing
 is `claude-<iTerm2 session id>` where the session id is the LAST colon-component of the
 inherited `ITERM_SESSION_ID` (never the agent payload).
 
+## Sounds (`--sound`, `pesterm sounds`, `pesterm sample`)
+
+The per-event defaults above can be overridden. Pass `--sound <name>` when wiring to
+bake the override into the hook command:
+
+```sh
+pesterm wire claude --sound Glass     # → '…/pesterm' --adapter claude --sound Glass
+```
+
+When present, `--sound` replaces the default sound for whatever events that hook entry
+handles; when absent, the per-event defaults stand. For different sounds per event,
+hand-wire a separate matcher entry per event, each with its own `--sound`.
+
+Sound names resolve from the standard NSSound directories — `/System/Library/Sounds`,
+`~/Library/Sounds`, `/Library/Sounds` — so any custom sound dropped into
+`~/Library/Sounds` (e.g. `notification.aiff`, `codex-notification.aiff`) works as a
+`--sound` value. Discover and audition names:
+
+```sh
+pesterm sounds              # authoritative list of valid --sound names (system + customs)
+pesterm sample Glass        # play a sound to hear it; errors if the name is unknown
+```
+
+Note: the newer macOS Tahoe alert sounds (Boop, etc.) are NOT name-addressable here —
+only the classic `/System/Library/Sounds` set and custom-dir sounds resolve by name.
+
 ## Known wrinkles
 
 1. **Alerts style is mandatory** (grant #1 above) — banners kill the click.

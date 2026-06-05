@@ -239,6 +239,32 @@ final class ClaudeHookWriterTests: XCTestCase {
         XCTAssertTrue(cmd.hasPrefix("'"), "command must open with a single quote")
     }
 
+    // 12. wire with --sound appends a single-quoted --sound <name> to the command.
+    func testWireWithSoundOverride() throws {
+        let current = try SettingsMerger.load(path: path())
+        let merged = try SettingsMerger.upsert(current, event: writer.hookEvent,
+                                               isMine: writer.isMine,
+                                               entry: writer.makeEntry(command: "/bin/pesterm", sound: "Glass"))
+        try SettingsMerger.write(merged, to: path())
+        let s = try SettingsMerger.load(path: path())
+        XCTAssertEqual(commands(in: notificationEntries(s)),
+                       ["'/bin/pesterm' --adapter claude --sound 'Glass'"])
+    }
+
+    // 13. no sound → no --sound suffix (defaults apply). isMine still matches it.
+    func testWireWithoutSoundHasNoSuffix() {
+        let entry = writer.makeEntry(command: "/bin/pesterm", sound: nil)
+        let cmds = commands(in: [entry])
+        XCTAssertEqual(cmds, ["'/bin/pesterm' --adapter claude"])
+        XCTAssertTrue(writer.isMine(entry))
+    }
+
+    // 14. a --sound entry is still recognized as ours (re-wire replaces it).
+    func testSoundEntryIsMine() {
+        let entry = writer.makeEntry(command: "/bin/pesterm", sound: "Glass")
+        XCTAssertTrue(writer.isMine(entry))
+    }
+
     // Registry sanity.
     func testRegistry() {
         XCTAssertNotNil(HookWriterRegistry.writer(for: "claude"))

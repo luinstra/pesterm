@@ -18,6 +18,15 @@ protocol HookWriter {
     /// True iff `entry` is pesterm's own hook entry (matches regardless of path).
     func isMine(_ entry: Any) -> Bool
     /// Build the canonical hook entry. `command` is the bare executable path; the
-    /// writer appends its own adapter flag(s).
-    func makeEntry(command: String) -> [String: Any]
+    /// writer appends its own adapter flag(s). `sound`, when non-nil, appends a
+    /// `--sound <name>` override so the wired hook uses that sound instead of the
+    /// per-event defaults.
+    func makeEntry(command: String, sound: String?) -> [String: Any]
+}
+
+extension HookWriter {
+    /// Convenience: build an entry with no sound override (defaults apply).
+    func makeEntry(command: String) -> [String: Any] {
+        makeEntry(command: command, sound: nil)
+    }
 }

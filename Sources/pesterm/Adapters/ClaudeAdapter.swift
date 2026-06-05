@@ -59,7 +59,14 @@ enum ClaudeAdapter {
     /// Build a NotificationRequest from the payload + the captured iTerm2 session id.
     /// Returns nil if the event maps to a suppressed/unknown type (caller exits 0).
     /// `sessionId` is the iTerm2 session GUID parsed from the env (NOT payload.sessionId).
-    static func buildRequest(from payload: Payload, iTermSessionId: String?) -> NotificationRequest? {
+    ///
+    /// `soundOverride` (from `--sound <name>`) REPLACES the event's default sound when
+    /// present; when nil the per-event default from `eventMapping` stands. `eventMapping`
+    /// itself stays pure — the override is applied here at the call site so per-event
+    /// defaults remain untouched and a user can still wire distinct `--sound` values on
+    /// separate matcher entries.
+    static func buildRequest(from payload: Payload, iTermSessionId: String?,
+                             soundOverride: String? = nil) -> NotificationRequest? {
         guard let mapped = eventMapping(notificationType: payload.notificationType) else {
             return nil
         }
@@ -69,7 +76,7 @@ enum ClaudeAdapter {
             title: title,
             subtitle: subtitle,
             body: mapped.message,
-            sound: mapped.sound,
+            sound: soundOverride ?? mapped.sound,
             source: .claude,
             groupID: group
         )

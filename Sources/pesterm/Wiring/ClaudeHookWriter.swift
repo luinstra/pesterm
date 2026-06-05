@@ -42,12 +42,20 @@ struct ClaudeHookWriter: HookWriter {
     /// evaluation/expansion. `isMine` matches the `--adapter claude` substring, which
     /// quoting the path leaves intact, so prior unquoted/double-quoted entries are
     /// still detected/replaced.
-    func makeEntry(command: String) -> [String: Any] {
+    ///
+    /// When `sound` is non-nil the command gains a trailing `--sound '<name>'` (the name
+    /// is single-quoted with the same POSIX rule as the path), overriding the per-event
+    /// default sounds for whatever events this entry handles.
+    func makeEntry(command: String, sound: String?) -> [String: Any] {
+        var cmd = "\(Self.shellQuote(command)) \(Self.adapterFlag)"
+        if let sound = sound, !sound.isEmpty {
+            cmd += " --sound \(Self.shellQuote(sound))"
+        }
         return [
             "hooks": [
                 [
                     "type": "command",
-                    "command": "\(Self.shellQuote(command)) \(Self.adapterFlag)"
+                    "command": cmd
                 ]
             ]
         ]

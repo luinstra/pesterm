@@ -25,6 +25,9 @@ struct WireCommand: ParsableCommand {
     @Option(name: .long, help: "Pin the command path written into the hook (e.g. the install symlink).")
     var commandPath: String?
 
+    @Option(name: .long, help: "Override the notification sound in the wired hook (e.g. Glass). Omit to keep the per-event defaults. Run `pesterm sounds` for valid names.")
+    var sound: String?
+
     func run() throws {
         guard let writer = HookWriterRegistry.writer(for: agent) else {
             Wiring.fail("unknown agent '\(agent)'. Supported: \(HookWriterRegistry.supportedAgents.joined(separator: ", "))",
@@ -53,7 +56,7 @@ struct WireCommand: ParsableCommand {
             Wiring.fail("\(error)", code: 1)
         }
 
-        let entry = writer.makeEntry(command: command)
+        let entry = writer.makeEntry(command: command, sound: sound)
         let proposed: [String: Any]
         do {
             proposed = try SettingsMerger.upsert(current, event: writer.hookEvent,
@@ -74,7 +77,11 @@ struct WireCommand: ParsableCommand {
         do {
             let backup = try SettingsMerger.write(proposed, to: targetPath)
             print("Wired \(agent) hook → \(targetPath)")
-            print("  command: \(command) \(ClaudeHookWriter.adapterFlag)")
+            var summary = "\(command) \(ClaudeHookWriter.adapterFlag)"
+            if let sound = sound, !sound.isEmpty {
+                summary += " --sound \(sound)"
+            }
+            print("  command: \(summary)")
             if let backup = backup {
                 print("  backup:  \(backup)")
             }

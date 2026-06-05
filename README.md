@@ -52,10 +52,48 @@ changed and never creates a redundant backup.
 | `pesterm unwire <agent>` | Remove **only** pesterm's hook entry; never touches unrelated hooks. |
 | `pesterm status` | Report bundle path, CLI entry + on-`PATH` state, per-agent wired state (with the command path + a stale flag), running bundle identity, and the manual grants. |
 | `pesterm post --message ...` | Post a notification directly (used by the adapters internally). |
+| `pesterm sounds` | List the valid `--sound` names from the standard macOS Sounds dirs (system + your customs). |
+| `pesterm sample <name>` | Play a sound by name to audition it before wiring. |
 
 Supported agent today: `claude`. Useful flags: `--yes` (skip the confirm prompt),
 `--settings <path>` (override the target settings file), `--command-path <path>`
-(pin the path written into the hook).
+(pin the path written into the hook), `--sound <name>` (override the notification
+sound in the wired hook — see below).
+
+### Sounds
+
+Each Claude event has a default sound:
+
+| Event | Default sound |
+|-------|---------------|
+| `idle_prompt` | Morse |
+| `permission_prompt` | Hero |
+| `elicitation_dialog` | Pop |
+
+Override the sound for the wired hook with `--sound`:
+
+```sh
+pesterm wire claude --sound Glass     # all events use Glass instead of the defaults
+```
+
+This bakes `--sound Glass` into the hook command
+(`… pesterm --adapter claude --sound Glass`). Want different sounds per event? Wire a
+separate matcher entry per event by hand, each with its own `--sound` — no extra code
+needed.
+
+Sound names come from the standard NSSound directories — `/System/Library/Sounds`,
+`~/Library/Sounds`, and `/Library/Sounds` — so any custom sound you drop into
+`~/Library/Sounds` (e.g. `notification.aiff`, `codex-notification.aiff`) is usable as a
+`--sound` value. List the valid names and audition them:
+
+```sh
+pesterm sounds              # authoritative list of valid --sound values
+pesterm sample Glass        # play a sound to hear it
+```
+
+Note: the newer macOS Tahoe alert sounds (Boop, etc.) are **not** name-addressable
+here — only the classic `/System/Library/Sounds` set and your own custom-dir sounds
+resolve by name.
 
 `wire`/`unwire`/`status` are **pure CLI** — they run and exit without spinning up
 AppKit, so `status` returns instantly.

@@ -22,7 +22,7 @@ struct PostCommand: ParsableCommand {
     @Option(name: .long, help: "Notification body text. Required.")
     var message: String
 
-    @Option(name: .long, help: "Notification sound name (e.g. Hero, Morse, Pop).")
+    @Option(name: .long, help: "Notification sound name (e.g. Hero, Morse, Pop). Run `pesterm sounds` for valid names.")
     var sound: String?
 
     @Option(name: .long, help: "Agent source: claude or generic. Default: generic.")

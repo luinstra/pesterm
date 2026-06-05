@@ -108,4 +108,41 @@ final class ClaudeAdapterTests: XCTestCase {
         XCTAssertEqual(req?.body, "Awaiting your input")
         XCTAssertEqual(req?.sound, "Morse")
     }
+
+    // --sound override: REPLACES the per-event default for the adapter path.
+
+    func testBuildRequestSoundOverrideReplacesDefault() {
+        let payload = ClaudeAdapter.parse(
+            Data(#"{"notification_type":"permission_prompt","cwd":"/x/proj"}"#.utf8))!
+        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: "G",
+                                             soundOverride: "Glass")
+        XCTAssertEqual(req?.sound, "Glass", "override replaces the Hero default")
+        // The rest of the mapping is untouched.
+        XCTAssertEqual(req?.body, "Permission required")
+    }
+
+    func testBuildRequestNoOverrideKeepsDefault() {
+        let payload = ClaudeAdapter.parse(
+            Data(#"{"notification_type":"permission_prompt"}"#.utf8))!
+        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: nil,
+                                             soundOverride: nil)
+        XCTAssertEqual(req?.sound, "Hero", "no override → per-event default stands")
+    }
+
+    func testBuildRequestOverrideAppliesAcrossEvents() {
+        // Whatever event the entry handles, the override wins.
+        let idle = ClaudeAdapter.parse(Data(#"{"notification_type":"idle_prompt"}"#.utf8))!
+        let elic = ClaudeAdapter.parse(Data(#"{"notification_type":"elicitation_dialog"}"#.utf8))!
+        XCTAssertEqual(
+            ClaudeAdapter.buildRequest(from: idle, iTermSessionId: nil, soundOverride: "Glass")?.sound,
+            "Glass")
+        XCTAssertEqual(
+            ClaudeAdapter.buildRequest(from: elic, iTermSessionId: nil, soundOverride: "Glass")?.sound,
+            "Glass")
+    }
+
+    // eventMapping stays pure — the override never touches it.
+    func testEventMappingUnaffectedByOverride() {
+        XCTAssertEqual(ClaudeAdapter.eventMapping(notificationType: "permission_prompt")?.sound, "Hero")
+    }
 }

@@ -19,7 +19,10 @@ private func buildRequestAndRevealer() -> (NotificationRequest, TerminalRevealer
     // standard parse (root --help, or the `post` subcommand).
     let args = Array(CommandLine.arguments.dropFirst())
     if let adapterValue = adapterArgument(in: args) {
-        return buildFromAdapter(adapterValue, revealer: revealer)
+        // Optional `--sound <name>` (or `--sound=<name>`) OVERRIDES the event's default
+        // sound for whatever events this hook entry handles.
+        let soundOverride = soundArgument(in: args)
+        return buildFromAdapter(adapterValue, soundOverride: soundOverride, revealer: revealer)
     }
 
     // Standard parse: `post` subcommand builds the request. `--help` / errors are
@@ -79,9 +82,31 @@ private func adapterArgument(in args: [String]) -> String? {
     return nil
 }
 
+/// Extract the value of `--sound` from raw args, supporting both `--sound <name>` and
+/// `--sound=<name>`. Returns nil if not present (defaults stand). Empty value (`--sound`
+/// with no following token) returns nil so a stray flag never wipes the default.
+private func soundArgument(in args: [String]) -> String? {
+    var i = 0
+    while i < args.count {
+        let arg = args[i]
+        if arg == "--sound" {
+            if i + 1 < args.count, !args[i + 1].isEmpty {
+                return args[i + 1]
+            }
+            return nil
+        }
+        if arg.hasPrefix("--sound=") {
+            let value = String(arg.dropFirst("--sound=".count))
+            return value.isEmpty ? nil : value
+        }
+        i += 1
+    }
+    return nil
+}
+
 /// Adapter mode: read ALL of stdin (readDataToEndOfFile — returns at EOF incl. empty;
 /// V4), map to a request, or exit 0 on suppress/unknown (C3).
-private func buildFromAdapter(_ adapter: String, revealer: TerminalRevealer?)
+private func buildFromAdapter(_ adapter: String, soundOverride: String?, revealer: TerminalRevealer?)
     -> (NotificationRequest, TerminalRevealer?) {
     guard adapter == "claude" else {
         FileHandle.standardError.write(
@@ -101,7 +126,8 @@ private func buildFromAdapter(_ adapter: String, revealer: TerminalRevealer?)
     // iTerm2 session id from the env (NOT payload). Used only for the coalescing group.
     let iTermSessionId = iTermSessionIdFromEnv()
 
-    guard let request = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: iTermSessionId) else {
+    guard let request = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: iTermSessionId,
+                                                   soundOverride: soundOverride) else {
         // Suppressed (auth_success) or unknown/missing type. Log + exit 0 (C3).
         let type = payload.notificationType ?? "<missing>"
         if type == "auth_success" {
@@ -126,6 +152,19 @@ private func iTermSessionIdFromEnv() -> String? {
 // MARK: - Entry point
 
 let (request, revealer) = buildRequestAndRevealer()
+
+// Diagnostic dry-run: when PESTERM_PRINT_REQUEST is set, print the BUILT request
+// (title/subtitle/body/sound/group) and exit 0 WITHOUT posting or spinning AppKit.
+// Lets the install/verify flow assert the resolved sound (e.g. a --sound override)
+// deterministically and without keep-alive. No effect when the env var is unset.
+if env["PESTERM_PRINT_REQUEST"] != nil {
+    print("title: \(request.title)")
+    print("subtitle: \(request.subtitle ?? "<nil>")")
+    print("body: \(request.body)")
+    print("sound: \(request.sound ?? "<nil>")")
+    print("group: \(request.groupID ?? "<nil>")")
+    exit(0)
+}
 
 // THEN construct AppKit and run the loop so delegate callbacks deliver (PP1).
 let app = NSApplication.shared
