@@ -21,6 +21,95 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_NAME="pesterm"
 BUNDLE_ID="com.luinstra.pesterm"
 
+# Branding sources: both are committed, original 1024×1024 PNGs — no /Applications
+# dependency. The "claude" source is our own Claude-ish mark (rust sunburst on a
+# near-black terminal squircle); the generic source is the amber pesterm glyph.
+# Regenerate via scripts/gen-claude-icon.swift / scripts/gen-pesterm-icon.swift.
+CLAUDE_PNG="$REPO_ROOT/assets/claude-icon-1024.png"
+FALLBACK_PNG="$REPO_ROOT/assets/pesterm-icon-1024.png"
+
+# Build Contents/Resources/pesterm.icns in the bundle $1 from the 1024 PNG $2, via a
+# standard macOS iconset (sips-resized 16..512 with @1x/@2x; 1024 is the 512@2x) +
+# iconutil. Echoes nothing; non-zero on failure.
+pesterm_build_icns_from_png() {
+    local app_bundle="$1"
+    local src_png="$2"
+    local res_dir="$app_bundle/Contents/Resources"
+    mkdir -p "$res_dir"
+
+    local iconset
+    iconset="$(mktemp -d)/pesterm.iconset"
+    mkdir -p "$iconset"
+    sips -z 16 16     "$src_png" --out "$iconset/icon_16x16.png"      >/dev/null
+    sips -z 32 32     "$src_png" --out "$iconset/icon_16x16@2x.png"   >/dev/null
+    sips -z 32 32     "$src_png" --out "$iconset/icon_32x32.png"      >/dev/null
+    sips -z 64 64     "$src_png" --out "$iconset/icon_32x32@2x.png"   >/dev/null
+    sips -z 128 128   "$src_png" --out "$iconset/icon_128x128.png"    >/dev/null
+    sips -z 256 256   "$src_png" --out "$iconset/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256   "$src_png" --out "$iconset/icon_256x256.png"    >/dev/null
+    sips -z 512 512   "$src_png" --out "$iconset/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512   "$src_png" --out "$iconset/icon_512x512.png"    >/dev/null
+    sips -z 1024 1024 "$src_png" --out "$iconset/icon_512x512@2x.png" >/dev/null
+
+    if ! iconutil -c icns "$iconset" -o "$res_dir/pesterm.icns"; then
+        echo "error: iconutil failed to build pesterm.icns from $iconset" >&2
+        rm -rf "$(dirname "$iconset")"
+        return 1
+    fi
+    rm -rf "$(dirname "$iconset")"
+    return 0
+}
+
+# Embed the bundle icon at $1 (an assembled .app) as Contents/Resources/pesterm.icns
+# and set the display name in $1/Contents/Info.plist. MUST run BEFORE signing (R3):
+# mutating an ad-hoc-signed bundle breaks its signature.
+#
+# The agent to brand for is $2 (default "claude" — the single agent today):
+#   - claude  → build pesterm.icns from assets/claude-icon-1024.png (our committed
+#               Claude-ish mark). Display name "Claude Code".
+#   - else    → build pesterm.icns from assets/pesterm-icon-1024.png (amber glyph).
+#               Display name "pesterm". Generic / unknown agents land here.
+# If the claude PNG is missing, fall back to the amber generic source.
+#
+# Echoes "claude" or "fallback" on stdout so callers can report which path ran.
+pesterm_embed_icon() {
+    local app_bundle="$1"
+    local agent="${2:-claude}"
+    local plist="$app_bundle/Contents/Info.plist"
+
+    if [[ "$agent" == "claude" && -f "$CLAUDE_PNG" ]]; then
+        if ! pesterm_build_icns_from_png "$app_bundle" "$CLAUDE_PNG"; then
+            return 1
+        fi
+        pesterm_set_display_name "$plist" "Claude Code"
+        echo "claude"
+        return 0
+    fi
+
+    # Generic / fallback: build pesterm.icns from the committed amber 1024 PNG.
+    if [[ ! -f "$FALLBACK_PNG" ]]; then
+        echo "error: fallback icon PNG missing at $FALLBACK_PNG (run scripts/gen-pesterm-icon.swift)" >&2
+        return 1
+    fi
+    if ! pesterm_build_icns_from_png "$app_bundle" "$FALLBACK_PNG"; then
+        return 1
+    fi
+    pesterm_set_display_name "$plist" "pesterm"
+    echo "fallback"
+    return 0
+}
+
+# Set CFBundleDisplayName in $1 (a plist) to $2. Adds the key if absent.
+pesterm_set_display_name() {
+    local plist="$1"
+    local name="$2"
+    if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$plist" >/dev/null 2>&1; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $name" "$plist"
+    else
+        /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $name" "$plist"
+    fi
+}
+
 # Build the release binary and echo its absolute path on stdout.
 pesterm_build_release() {
     swift build -c release >&2
@@ -33,11 +122,13 @@ pesterm_build_release() {
     echo "$built"
 }
 
-# Assemble (and render Info.plist) a .app bundle at $1 from the built binary $2.
+# Assemble (and render Info.plist) a .app bundle at $1 from the built binary $2,
+# branding for agent $3 (default "claude" — the single agent today).
 # Does NOT sign — sign LAST, after all mutation and final placement (R3 / C4).
 pesterm_assemble_bundle() {
     local app_bundle="$1"
     local built_bin="$2"
+    local agent="${3:-claude}"
 
     rm -rf "$app_bundle"
     mkdir -p "$app_bundle/Contents/MacOS"
@@ -53,6 +144,16 @@ pesterm_assemble_bundle() {
         echo "error: Info.plist missing NSAppleEventsUsageDescription" >&2
         return 1
     fi
+
+    # Embed the icon + set the display name BEFORE signing (R3). Echo which path ran
+    # (claude vs fallback) to stderr so the caller's logs show it without polluting
+    # this function's stdout (assemble has no stdout contract, but keep it clean).
+    local icon_path
+    if ! icon_path="$(pesterm_embed_icon "$app_bundle" "$agent")"; then
+        echo "error: icon embed failed for $app_bundle" >&2
+        return 1
+    fi
+    echo "    icon: embedded via $icon_path path (Contents/Resources/pesterm.icns)" >&2
 }
 
 # Ad-hoc codesign the assembled bundle at $1. Call ONLY after all mutation + final
