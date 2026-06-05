@@ -8,9 +8,8 @@ struct NotificationRequest {
     var body: String
     var sound: String?
     var source: AgentSource
-    /// Coalescing key. For NSUserNotification this maps to `identifier` — posting
-    /// the same identifier REPLACES the prior notification (the coalescing
-    /// mechanism, since NSUserNotification has no `groupID`).
+    /// Coalescing key. Maps to the UNNotificationRequest `identifier` — posting
+    /// the same identifier REPLACES the prior notification (the coalescing mechanism).
     var groupID: String?
 
     init(

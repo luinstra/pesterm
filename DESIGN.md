@@ -61,8 +61,8 @@ reveal) plus a swappable **notification backend**:
                                               +---------------------------------+--------------------+
                                               |                                                      |
                                      [NotificationBackend]                                  [TerminalRevealer]
-                                  NSUserNotification (v1)                          iTerm2 via ScriptingBridge + AppKit (v1)
-                                  UNUserNotification (later)                       other terminals later, behind the protocol
+                                  UNUserNotification                               iTerm2 via ScriptingBridge + AppKit (v1)
+                                  (behind the protocol)                            other terminals later, behind the protocol
 ```
 
 ### Key invariant
@@ -192,20 +192,21 @@ pesterm post \
 ## 12. Roadmap
 
 - **Phase 0** — this spec.
-- **Phase 1** — Swift core + NSUserNotification backend + iTerm2 revealer
+- **Phase 1** — Swift core + UserNotifications backend + iTerm2 revealer
   (ScriptingBridge) + Claude Code adapter. Parity with the bash prototype, zero external deps.
+  (Shipped first on the older NSUserNotification API, then migrated to UNUserNotification.)
 - **Phase 2** — build/sign/install tooling; per-agent settings merge.
 - **Phase 3** — Codex, Gemini, Antigravity adapters.
 - **Phase 4** — more terminals: Terminal.app (ScriptingBridge), WezTerm/Kitty
   (their CLIs); capability tiers + graceful degradation.
-- **Phase 5 (maybe)** — UNUserNotification migration; per-source branding bundles;
-  tmux (two-level reveal).
+- **Phase 5 (maybe)** — per-source branding bundles; tmux (two-level reveal).
 
 ## 13. Open questions
 
-- **Notification API:** start on NSUserNotification (friction-free from a CLI-launched
-  bundle) vs jump straight to UNUserNotification (modern, but stricter signing/auth)?
-  Lean: start NS, keep it behind `NotificationBackend` for a contained later swap.
+- **Notification API:** ~~start on NSUserNotification vs jump to UNUserNotification?~~
+  RESOLVED — shipped on NS first to dodge the auth prompt, then migrated to
+  UNUserNotification once a spike proved it delivers fine from our ad-hoc-signed bundle.
+  The `NotificationBackend` protocol made it a one-file swap. NS is gone.
 - **SwiftPM-only vs an Xcode project** for the `.app`/bundle resources?
 - **Per-source branding** in v1 or defer? (Leaning defer.)
 - **Cleanest keep-alive-for-click** pattern (run loop + timeout).

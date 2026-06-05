@@ -170,7 +170,7 @@ if env["PESTERM_PRINT_REQUEST"] != nil {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory) // matches LSUIElement; no Dock/menu-bar presence.
 
-let backend: NotificationBackend = NSUserNotificationBackend()
+let backend: NotificationBackend = UNUserNotificationBackend()
 let delegate = AppDelegate(request: request, revealer: revealer, backend: backend)
 app.delegate = delegate
 

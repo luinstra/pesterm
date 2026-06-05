@@ -1,16 +1,15 @@
 import Foundation
 import UserNotifications
 
-/// PC1 contingency backend (V6). NOT wired by default — NSUserNotificationBackend
-/// is v1. This exists so the escalation is concrete and executable IF the Task 3
-/// reliability gate sees an ACTIVATION miss during click trials (>= 1 miss across
-/// ~10 click trials triggers the swap). Only this file + entitlement/auth setup
-/// change; core, reveal, adapter, and keep-alive wiring are untouched.
+/// The notification backend. Posts via the modern UserNotifications framework
+/// (UNUserNotificationCenter); requires a one-time authorization grant on first post
+/// and a valid bundle identity — both satisfied by our ad-hoc-signed .app bundle (the
+/// NS-first hedge proved unnecessary: UN delivers fine from this signing setup).
 ///
-/// Md caveat: dismiss parity does NOT carry over. UNUserNotificationCenter has NO
-/// reliable callback for a user MANUALLY dismissing a delivered notification (unlike
-/// NS's didDismissAlert). In this path the 600s safety cap (+ withdraw) is the SOLE
-/// dismiss backstop; manual-dismiss-driven early exit is an NS-path-only behavior.
+/// Dismiss caveat: UNUserNotificationCenter has NO reliable callback for a user
+/// MANUALLY dismissing a delivered notification, so there is no dismiss-driven early
+/// exit. The 600s safety cap (+ withdraw) is the SOLE backstop when neither a click
+/// nor the cap's own timeout fires.
 final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNotificationCenterDelegate {
 
     static let maxLifetimeSeconds: TimeInterval = 600
@@ -37,7 +36,12 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         }
     }
 
-    private func schedule(_ request: NotificationRequest) {
+    /// PURE: build the notification content for a request. No scheduling, no auth, no
+    /// timer — pulled out so the banner's shape (title/subtitle/body/sound) is
+    /// unit-testable without posting. No action button is added: UN shows none by
+    /// default (no UNNotificationCategory registered), so the whole banner body is the
+    /// click target → `.contentsClicked` → reveal.
+    static func makeContent(from request: NotificationRequest) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = request.title
         if let subtitle = request.subtitle {
@@ -47,6 +51,11 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         if let sound = request.sound {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(sound))
         }
+        return content
+    }
+
+    private func schedule(_ request: NotificationRequest) {
+        let content = Self.makeContent(from: request)
 
         // Use the group id as the request identifier so re-posts coalesce/replace.
         let identifier = request.groupID ?? UUID().uuidString

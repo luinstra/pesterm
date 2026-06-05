@@ -24,13 +24,17 @@ pesterm status
 
 ## One-time human setup (REQUIRED — pesterm cannot do these for you)
 
-1. **Notification style = Alerts.** Banners auto-dismiss and kill the click, so the
-   reveal never fires. After the first post registers pesterm, open
-   **System Settings → Notifications → pesterm** and set the style to **Alerts**.
-   (There is no `requestAuthorization` call in the NSUserNotification path — the
-   signed bundle self-registers on its first post.)
+1. **Allow notifications.** The FIRST time pesterm posts, macOS shows a one-time
+   **"pesterm wants to send you notifications"** prompt (the UserNotifications
+   authorization grant). Click **Allow**. If you deny it, banners are suppressed until
+   you re-enable pesterm under **System Settings → Notifications → pesterm**.
 
-2. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
+2. **Notification style = Alerts.** Banners auto-dismiss and kill the click, so the
+   reveal never fires. Open **System Settings → Notifications → pesterm** and set the
+   style to **Alerts** (this is separate from the allow-prompt above — granting
+   notifications doesn't pick the style for you).
+
+3. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
    ScriptingBridge (i.e. the first time you click a notification and it reveals), macOS
    shows a one-time **"pesterm wants to control iTerm2"** prompt. Click **OK**. This
    prompt only appears because the bundle carries `NSAppleEventsUsageDescription`. If
@@ -138,8 +142,8 @@ only the classic `/System/Library/Sounds` set and custom-dir sounds resolve by n
 
 ## Known wrinkles
 
-1. **Alerts style is mandatory** (grant #1 above) — banners kill the click.
-2. **One-time iTerm2 control grant** (grant #2 above).
+1. **Alerts style is mandatory** (grant #2 above) — banners kill the click.
+2. **One-time iTerm2 control grant** (grant #3 above).
 3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle cdhash, so a
    rebuild + reinstall changes the hash and re-triggers the "control iTerm2" prompt.
    Expected until Phase 5 (real Developer ID signing + notarization) lands. The
