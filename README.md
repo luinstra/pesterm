@@ -118,14 +118,6 @@ pesterm unwire claude
 rm -rf ~/.local/share/pesterm/pesterm.app ~/.local/bin/pesterm
 ```
 
-## Gotchas
-
-- **Alert Style must be Persistent.** A temporary alert auto-dismisses and kills the click,
-  so the reveal never fires.
-- **Rebuilding re-prompts the iTerm2 grant.** Ad-hoc signatures key off the bundle's
-  cdhash, so a rebuild + reinstall changes the hash and re-triggers the "control iTerm2"
-  prompt — expected until real Developer ID signing lands.
-
 ## More
 
 - **[SETUP.md](./SETUP.md)** — one-time grants and manual hook wiring
