@@ -24,6 +24,29 @@ final class ClaudePermissionAdapterTests: XCTestCase {
         XCTAssertNil(ClaudePermissionAdapter.parse(Data("not json".utf8)))
     }
 
+    // MARK: shouldMediate (denylist of interactive/meta tools)
+
+    func testShouldMediateSkipsAskUserQuestion() {
+        XCTAssertFalse(ClaudePermissionAdapter.shouldMediate("AskUserQuestion"))
+    }
+
+    func testShouldMediateSkipsExitPlanMode() {
+        XCTAssertFalse(ClaudePermissionAdapter.shouldMediate("ExitPlanMode"))
+    }
+
+    func testShouldMediateAllowsSideEffectingTools() {
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate("Bash"))
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate("Write"))
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate("WebFetch"))
+    }
+
+    func testShouldMediateDefaultsTrueForNilOrEmpty() {
+        // Mediate by default — never silently skip an unknown/missing tool name.
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate(nil))
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate(""))
+        XCTAssertTrue(ClaudePermissionAdapter.shouldMediate("SomeFutureTool"))
+    }
+
     // MARK: approvableText
 
     func testApprovableTextBashFullCommand() {

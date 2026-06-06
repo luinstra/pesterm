@@ -167,6 +167,15 @@ private func buildPermissionRequest(revealer: TerminalRevealer?)
         exit(0)
     }
 
+    // Interactive/meta tools (AskUserQuestion, ExitPlanMode) are not mediated — emit
+    // nothing + exit 0 so Claude handles them with its native terminal UI. NEVER
+    // auto-allow; this is a terminal fallback, not an approval.
+    guard ClaudePermissionAdapter.shouldMediate(payload.toolName) else {
+        FileHandle.standardError.write(
+            Data("pesterm: tool '\(payload.toolName ?? "?")' is not mediated; terminal fallback\n".utf8))
+        exit(0)
+    }
+
     let iTermSessionId = iTermSessionIdFromEnv()
 
     guard let request = ClaudePermissionAdapter.buildRequest(from: payload,

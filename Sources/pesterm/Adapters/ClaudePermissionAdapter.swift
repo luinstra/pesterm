@@ -76,6 +76,26 @@ enum ClaudePermissionAdapter {
     /// groupID directly as the request identifier.
     static let groupPrefix = "claude-perm-"
 
+    /// Tool names pesterm does NOT mediate with an Approve/Deny notification. These are
+    /// INTERACTIVE / meta tools whose own in-terminal UI IS the point — mediating them is
+    /// absurd (you'd "approve" a question just to then answer the question, losing the
+    /// prompt's content). For these the adapter emits nothing and exits 0, so Claude
+    /// falls back to its native terminal UI. This is a DENYLIST, not an allowlist: every
+    /// other tool (and any unknown/missing tool name) is mediated by default, so a new
+    /// side-effecting tool is never silently un-gated ("silence is NOT safety").
+    static let unmediatedTools: Set<String> = [
+        "AskUserQuestion",
+        "ExitPlanMode",
+    ]
+
+    /// PURE: should pesterm post an Approve/Deny notification for this tool? True for
+    /// everything except the interactive `unmediatedTools`; true for nil/empty (mediate
+    /// by default — never silently skip an unknown tool).
+    static func shouldMediate(_ toolName: String?) -> Bool {
+        guard let tool = toolName, !tool.isEmpty else { return true }
+        return !unmediatedTools.contains(tool)
+    }
+
     /// PURE: decode the hook JSON. Returns nil for empty/invalid input (caller
     /// suppresses + exits 0). Unit-testable without posting.
     static func parse(_ data: Data) -> PermissionPayload? {
