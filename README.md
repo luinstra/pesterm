@@ -2,161 +2,134 @@
 
 **Your CLI agent pesters you back to the right terminal tab.**
 
-A native macOS notifier for terminal-based AI coding agents — Claude Code, Codex,
-Gemini CLI, and Antigravity (`agy`). When an agent needs you (permission, a
-question, or it just finished a turn), pesterm posts a notification; click it and
-you land on the **exact terminal tab** the agent is running in.
+pesterm is a native macOS notifier for terminal-based AI coding agents. When your agent
+needs you — it wants permission, has a question, or just finished a turn — pesterm posts a
+notification. Click it and you land on the **exact iTerm2 tab** the agent is running in,
+across windows and split panes.
 
-It replaces the working bash proof-of-concept at
-[claude-notify-kit](https://github.com/luinstra/claude-notify-kit) with a single,
-self-contained Swift app — no `terminal-notifier` clone, no `uv`, no Python. The
-whole `-execute → reveal.sh → uv → python` chain collapses into one in-process
-Swift method.
+For **Claude Code** it does one more thing: **approve or deny tool permissions straight
+from the notification**, without switching back to the terminal.
 
-### Tool approvals (Approve / Deny from a notification)
+Supported today: **Claude Code**. Codex, Gemini CLI, and Antigravity are planned (each is
+an additive adapter — see [DESIGN.md](./DESIGN.md)).
 
-For Claude Code, pesterm can also be a **blocking tool-approval** hook: when Claude is
-about to prompt for tool permission, pesterm posts a **Persistent notification with
-Approve / Deny actions** showing the command (or the real path/url for non-Bash tools).
-On macOS (Big Sur+) the Approve/Deny actions appear under the notification's **"Options"**
-affordance, not as always-visible inline buttons — that's expected macOS behavior. Tap
-**Approve** to allow, **Deny** to deny — no terminal `1.Yes/2.No` menu. Because approvals
-own `permission_prompt`, the plain `Notification` hook's matcher drops that type when both
-are wired, so one permission never produces two banners. Click the
-notification **body** to reveal the terminal and read the full context WITHOUT deciding
-(the notification persists; you can still tap a button or let it time out). If you don't
-respond within 120 seconds — or on any error — pesterm falls back to Claude's terminal
-prompt and **never auto-allows**.
+## Requirements
 
-Approvals are **on by default** (`pesterm configure claude`); disable with
-`pesterm configure claude --no-approvals` (or answer "n" at the approvals prompt). The `PermissionRequest` hook is **interactive-only**
-(it doesn't fire under headless `claude -p`), and pesterm does NOT mediate **subagent**
-tool calls — those still prompt in the terminal (#23983). See **[SETUP.md](./SETUP.md)**.
-
-See **[DESIGN.md](./DESIGN.md)** for the architecture and roadmap, and
-**[SETUP.md](./SETUP.md)** for the one-time GUI grants.
+- macOS 11 (Big Sur) or later
+- iTerm2 (the jump-to-tab reveal drives iTerm2)
+- A Swift toolchain to build (Xcode or the Swift command-line tools)
 
 ## Install
-
-One command, no sudo:
 
 ```sh
 scripts/install.sh
 ```
 
-This builds the release binary, assembles and ad-hoc-signs a `pesterm.app` bundle,
-and:
+No sudo. The installer builds and ad-hoc-signs `pesterm.app`, installs it under `~/.local`
+(override with `PESTERM_PREFIX`), puts a `pesterm` command on your `PATH`, then hands off
+to **`pesterm configure`** — the guided setup that wires the Claude Code hooks, checks your
+macOS grants, and links you to anything still needed. Re-running is safe (idempotent).
 
-1. Places the bundle at `$PREFIX/share/pesterm/pesterm.app`
-   (default `PREFIX=$HOME/.local`; override with `PESTERM_PREFIX`). No sudo.
-2. Registers it with LaunchServices.
-3. Writes a CLI entry at `$PREFIX/bin/pesterm` — an `exec` wrapper that runs the
-   inner bundle binary (a bare symlink would NOT carry the bundle identity; the
-   wrapper is the terminal-notifier-proven pattern).
-4. Verifies the bundle identity **through that entry** (asserts
-   `Bundle.main.bundleIdentifier == com.luinstra.pesterm` and that the resolved
-   bundle path is inside the installed `.app`). The install **fails loudly** if not.
-5. Prints the exact `export PATH=...` line if `$PREFIX/bin` is not on your `PATH`.
-6. Hands off to **`pesterm configure`** — the guided setup that wires the Claude Code
-   hooks into `~/.claude/settings.json` (tool approvals on by default, stable
-   `$PREFIX/bin/pesterm` path), then reports **live grant state** and offers to open the
-   relevant System Settings panes for anything missing. It runs interactively at a
-   terminal and falls back to defaults when there's no TTY (`curl | bash` / CI). See
-   SETUP.md.
+If `~/.local/bin` isn't on your `PATH`, the installer prints the `export PATH=…` line to
+add to your shell profile.
 
-The install is **idempotent** — safe to re-run. Re-running re-applies only if the hooks
-changed and never creates a redundant backup.
+### One-time macOS grants
 
-### Commands
+pesterm can't click these for you; `configure` walks you to each. Detail in
+**[SETUP.md](./SETUP.md)**.
 
-| Command | What it does |
-|---------|--------------|
-| `pesterm configure <agent>` | **The front door** (replaces `wire`). Guided setup: choose tool approvals + sound, wire both hooks, then report live grant state and offer to deep-link the System Settings panes. Non-interactive with `--yes` (applies defaults). |
-| `pesterm unwire <agent>` | Remove **only** pesterm's hook entries (both events); never touches unrelated hooks. |
-| `pesterm status` | Report bundle path, CLI entry + on-`PATH` state, per-agent wired state (listed once, with a per-event breakdown + a stale flag), running bundle identity, and the manual grants. |
-| `pesterm post --message ...` | Post a notification directly (used by the adapters internally). |
-| `pesterm sounds` | List the valid `--sound` names from the standard macOS Sounds dirs (system + your customs). |
-| `pesterm sample <name>` | Play a sound by name to audition it before configuring. |
+- **Allow notifications** for pesterm (first notification prompts).
+- **Allow pesterm to control iTerm2** (first reveal prompts) — required for jump-to-tab.
+- **Alert Style → Persistent** (recommended) so the banner doesn't auto-dismiss before you
+  click it.
 
-Supported agent today: `claude`. Useful flags: `--yes` (non-interactive — apply
-defaults without prompting, the CI / `curl | bash` path), `--no-approvals` (disable the
-tool-approval hook), `--sound <name>` (override the notification sound; the tool-approval
-hook ignores `--sound`).
+## Usage
+
+### `pesterm configure`
+
+The front door. Run it any time to change your setup — it re-reads your choices and grant
+state, so it's the one command to remember.
+
+```sh
+pesterm configure                 # guided: tool approvals, sound, grant check
+pesterm configure --yes           # non-interactive: apply defaults (CI / curl | bash)
+pesterm configure --no-approvals  # notifications only, no tool approvals
+pesterm configure --sound Glass   # use Glass instead of the per-event default sounds
+```
+
+### Notifications
+
+When Claude needs you, you get a banner — click it to jump to the tab.
+
+| Event | Meaning | Default sound |
+|-------|---------|---------------|
+| `idle_prompt` | Awaiting your input | Morse |
+| `permission_prompt` | Permission required | Hero |
+| `elicitation_dialog` | A question for you | Pop |
+
+### Tool approvals (Claude Code)
+
+**On by default.** When Claude is about to ask for tool permission, pesterm posts a
+**Persistent notification with Approve / Deny actions** showing the command (or the real
+path/URL for non-Bash tools). Tap **Approve** or **Deny** — the terminal `1.Yes/2.No` menu
+is suppressed. Click the notification **body** (not a button) to reveal the tab and read
+full context *without* deciding. No response within 120s, or any error, falls back to
+Claude's own terminal prompt and **never auto-allows**.
+
+Caveats worth knowing:
+
+- **Interactive-only** — doesn't fire under headless `claude -p`.
+- **Subagent tool calls aren't mediated** — those still prompt in the terminal
+  ([#23983](https://github.com/anthropics/claude-code/issues/23983)). No banner ≠ blocked.
+- **Interactive tools aren't mediated** — `AskUserQuestion` and `ExitPlanMode` use Claude's
+  native prompt (approving a question just to then answer it makes no sense).
+
+Disable with `pesterm configure --no-approvals`.
 
 ### Sounds
 
-Each Claude event has a default sound:
-
-| Event | Default sound |
-|-------|---------------|
-| `idle_prompt` | Morse |
-| `permission_prompt` | Hero |
-| `elicitation_dialog` | Pop |
-
-Override the sound for the wired hook with `--sound`:
+Override the per-event defaults with `--sound`, or drop a custom `.aiff` into
+`~/Library/Sounds` and use its name. Want a different sound per event? Hand-add a matcher
+entry per event in `~/.claude/settings.json`, each with its own `--sound`.
 
 ```sh
-pesterm configure claude --sound Glass     # all events use Glass instead of the defaults
+pesterm sounds            # list valid --sound names (system + your customs)
+pesterm sample Glass      # audition a sound before using it
 ```
 
-This bakes `--sound Glass` into the hook command
-(`… pesterm --adapter claude --sound Glass`). Want different sounds per event? Add a
-separate matcher entry per event by hand, each with its own `--sound` — no extra code
-needed.
+Note: the newer macOS Tahoe alert sounds (Boop, etc.) aren't name-addressable — only the
+classic `/System/Library/Sounds` set and your custom-dir sounds resolve by name.
 
-Sound names come from the standard NSSound directories — `/System/Library/Sounds`,
-`~/Library/Sounds`, and `/Library/Sounds` — so any custom sound you drop into
-`~/Library/Sounds` (e.g. `notification.aiff`, `codex-notification.aiff`) is usable as a
-`--sound` value. List the valid names and audition them:
+### All commands
+
+| Command | What it does |
+|---------|--------------|
+| `pesterm configure [agent]` | Guided setup (the front door): tool approvals, sound, grant check + deep-links. `--yes` applies defaults non-interactively. |
+| `pesterm status` | Report install path, `PATH` state, per-agent wired state, running bundle identity, and the manual grants. |
+| `pesterm unwire <agent>` | Remove **only** pesterm's hook entries; never touches unrelated hooks. |
+| `pesterm sounds` | List valid `--sound` names. |
+| `pesterm sample <name>` | Play a sound by name to audition it. |
+| `pesterm post --message …` | Post a notification directly (used by the adapters internally). |
+
+## Uninstall
 
 ```sh
-pesterm sounds              # authoritative list of valid --sound values
-pesterm sample Glass        # play a sound to hear it
+pesterm unwire claude
+rm -rf ~/.local/share/pesterm/pesterm.app ~/.local/bin/pesterm
 ```
 
-Note: the newer macOS Tahoe alert sounds (Boop, etc.) are **not** name-addressable
-here — only the classic `/System/Library/Sounds` set and your own custom-dir sounds
-resolve by name.
+## Gotchas
 
-`configure`/`unwire`/`status` are **pure CLI** — they run and exit without spinning up
-the notification run loop, so `status` returns instantly. (`configure` reads grant state
-and may briefly play a sound sample, but never enters the keep-alive path.)
+- **Alert Style must be Persistent.** A temporary alert auto-dismisses and kills the click,
+  so the reveal never fires.
+- **Rebuilding re-prompts the iTerm2 grant.** Ad-hoc signatures key off the bundle's
+  cdhash, so a rebuild + reinstall changes the hash and re-triggers the "control iTerm2"
+  prompt — expected until real Developer ID signing lands.
 
-### PATH
+## More
 
-If the installer reports `$PREFIX/bin` is not on your `PATH`, add the printed line to
-your shell profile, e.g.:
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### Uninstall / unwire
-
-```sh
-pesterm unwire claude          # remove only pesterm's hook
-rm -rf "$HOME/.local/share/pesterm/pesterm.app" "$HOME/.local/bin/pesterm"
-```
-
-## Known wrinkles
-
-1. **Alert Style must be Persistent.** A temporary alert auto-dismisses and kills the
-   click, so the reveal never fires. Set **System Settings → Notifications → pesterm →
-   Alert Style → Persistent** once (macOS renamed "Banners / Alerts" to
-   "Temporary / Persistent"). (See SETUP.md.)
-2. **One-time "control iTerm2" grant.** The first reveal triggers a TCC prompt; click
-   OK once.
-3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle's cdhash, so a
-   rebuild + reinstall changes the hash and **re-triggers** the "control iTerm2"
-   prompt. This is expected until Phase 5 (real Developer ID signing) lands.
-
-## Future work
-
-- Homebrew formula (the `bin/` wrapper + `.app` layout already mirrors the
-  terminal-notifier formula shape).
-- Phase 3 adapters: Codex, Gemini CLI, Antigravity — each is an additive
-  `HookWriter` conformance; the merger and CLI don't change.
-- Phase 5: real Developer ID signing + notarization (fixes wrinkle #3).
+- **[SETUP.md](./SETUP.md)** — one-time grants and manual hook wiring
+- **[DESIGN.md](./DESIGN.md)** — architecture and roadmap
 
 ## License
 
