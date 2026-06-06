@@ -220,12 +220,6 @@ struct ConfigureCommand: ParsableCommand {
                 print("    → enable under System Settings → Privacy & Security → Automation")
             }
         }
-
-        // Alert Style FYI — user preference, NOT a gate. Mentioned once.
-        print("")
-        print("FYI: a Temporary alert style auto-dismisses and can eat the click-to-reveal.")
-        print("     Set Alert Style = Persistent under System Settings → Notifications → pesterm")
-        print("     if you want reveal to be reliable. (Your call — pesterm doesn't change it.)")
     }
 
     private func describe(_ state: GrantState) -> String {

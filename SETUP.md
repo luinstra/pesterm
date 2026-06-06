@@ -31,17 +31,7 @@ pesterm status
    authorization grant). Click **Allow**. If you deny it, banners are suppressed until
    you re-enable pesterm under **System Settings → Notifications → pesterm**.
 
-2. **Alert Style = Persistent.** A temporary notification auto-dismisses and kills the
-   click, so the reveal never fires. Open **System Settings → Notifications → pesterm**
-   and set **Alert Style** to **Persistent** (macOS renamed the old "Banners / Alerts"
-   choice to "Temporary / Persistent"; this is separate from the allow-prompt above —
-   granting notifications doesn't pick the style for you). **A Persistent alert style is
-   also LOAD-BEARING for the tool-approval Approve/Deny actions** (see below): on macOS
-   (Big Sur+) those actions appear under the notification's **"Options"** affordance, not
-   as always-visible inline buttons — that's expected macOS behavior. `pesterm status`
-   reminds you to set it.
-
-3. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
+2. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
    ScriptingBridge (i.e. the first time you click a notification and it reveals), macOS
    shows a one-time **"pesterm wants to control iTerm2"** prompt. Click **OK**. This
    prompt only appears because the bundle carries `NSAppleEventsUsageDescription`. If
@@ -109,7 +99,7 @@ written only when content actually changes.
 
 `pesterm configure claude` registers TWO hooks: the `Notification` hook above AND a blocking
 `PermissionRequest` tool-approval hook. When Claude is about to prompt for tool
-permission, pesterm posts a **Persistent-style notification with Approve / Deny actions**
+permission, pesterm posts a **notification with Approve / Deny actions**
 (on macOS Big Sur+ these appear under the notification's **"Options"** affordance, not as
 always-visible inline buttons). The body shows the action (the Bash command, or the real
 path/url for other tools); the title/subtitle carry the tool name + short session id.
@@ -216,16 +206,6 @@ pesterm sample Glass        # play a sound to hear it; errors if the name is unk
 
 Note: the newer macOS Tahoe alert sounds (Boop, etc.) are NOT name-addressable here —
 only the classic `/System/Library/Sounds` set and custom-dir sounds resolve by name.
-
-## Known wrinkles
-
-1. **Persistent Alert Style is mandatory** (grant #2 above) — a temporary alert kills the click.
-2. **One-time iTerm2 control grant** (grant #3 above).
-3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle cdhash, so a
-   rebuild + reinstall changes the hash and re-triggers the "control iTerm2" prompt.
-   Expected until Phase 5 (real Developer ID signing + notarization) lands. The
-   installer always signs LAST and runs `codesign --verify --deep --strict`, so a
-   broken/partial signature never ships to confuse TCC further.
 
 ## Future work
 

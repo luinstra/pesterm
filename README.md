@@ -40,8 +40,6 @@ pesterm can't click these for you; `configure` walks you to each. Detail in
 
 - **Allow notifications** for pesterm (first notification prompts).
 - **Allow pesterm to control iTerm2** (first reveal prompts) — required for jump-to-tab.
-- **Alert Style → Persistent** (recommended) so the banner doesn't auto-dismiss before you
-  click it.
 
 ## Usage
 
@@ -70,7 +68,7 @@ When Claude needs you, you get a banner — click it to jump to the tab.
 ### Tool approvals (Claude Code)
 
 **On by default.** When Claude is about to ask for tool permission, pesterm posts a
-**Persistent notification with Approve / Deny actions** showing the command (or the real
+**notification with Approve / Deny actions** showing the command (or the real
 path/URL for non-Bash tools). Tap **Approve** or **Deny** — the terminal `1.Yes/2.No` menu
 is suppressed. Click the notification **body** (not a button) to reveal the tab and read
 full context *without* deciding. No response within 120s, or any error, falls back to

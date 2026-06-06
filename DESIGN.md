@@ -47,9 +47,6 @@ native rewrite dissolves three of them:
    no `~/.local/bin`) — shelling to `uv`/Python broke silently. → The click
    handler runs **in-process Swift**; the entire `-execute → reveal.sh → uv →
    iterm2_reveal.py` chain collapses into one method.
-4. **Temporary alerts auto-dismiss; Persistent alerts stay** — the click needs the
-   Persistent Alert Style (macOS renamed "Banners / Alerts" to "Temporary / Persistent").
-   → Still a user setting; documented, unavoidable.
 
 ## 5. Architecture
 
@@ -184,9 +181,7 @@ pesterm post \
 ## 11. Gotchas to preserve (don't regress)
 
 - **Automation TCC** prompt the first time we drive iTerm2 via ScriptingBridge — one-time grant.
-- **Notification permission** + set the app's **Alert Style** to **Persistent**
-  (a temporary alert auto-dismisses and kills the click; macOS renamed "Banners / Alerts"
-  to "Temporary / Persistent").
+- **Notification permission** — the first post triggers the one-time allow prompt.
 - **Banner icon = posting bundle**; can't override per-notification.
 - **`ITERM_SESSION_ID` is inherited from the agent's env** — reveal reads env, never the payload.
 - **The app must outlive the post** to handle the click; model the keep-alive explicitly.
@@ -194,8 +189,8 @@ pesterm post \
 ## 11a. Tool approvals (blocking `PermissionRequest` hook) — NOTIFICATION-BUTTONS v1
 
 pesterm can act as a **blocking** Claude Code `PermissionRequest` hook. When Claude is
-about to prompt for tool permission, the hook fires and pesterm posts a **Persistent-style
-notification with action buttons** — **Approve** (primary) and **Deny** (second). On
+about to prompt for tool permission, the hook fires and pesterm posts a **notification
+with action buttons** — **Approve** (primary) and **Deny** (second). On
 macOS (Big Sur+) these actions appear under the notification's **"Options"** affordance,
 NOT as always-visible inline buttons — that's expected macOS behavior, not a bug. The
 body shows the approvable action; the title/subtitle carry the tool name + short session
@@ -266,11 +261,9 @@ cross-match.
 
 ### Known gaps
 
-- **Action buttons require the Persistent Alert Style** (documented manual grant;
-  `pesterm status` flags it). On macOS (Big Sur+) the Approve/Deny actions live under the
-  notification's **"Options"** affordance, not as always-visible inline buttons — expected
-  macOS behavior. Without the Persistent style the actions may not surface — the body-click
-  reveal + 120s timeout remain the safe fallback (still no auto-allow).
+- **Action buttons live under the notification's "Options" affordance** on macOS
+  (Big Sur+), not as always-visible inline buttons — expected macOS behavior. The
+  body-click reveal + 120s timeout remain the safe fallback (still no auto-allow).
 - **Subagent / Agent-Teams tool calls bypass these hooks (#23983)** — they still use
   Claude's normal terminal prompts. **Silence is NOT safety.**
 - **Interactive-only:** `PermissionRequest` does not fire under headless `claude -p`
