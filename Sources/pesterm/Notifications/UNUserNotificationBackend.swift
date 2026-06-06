@@ -6,24 +6,66 @@ import UserNotifications
 /// and a valid bundle identity — both satisfied by our ad-hoc-signed .app bundle (the
 /// NS-first hedge proved unnecessary: UN delivers fine from this signing setup).
 ///
+/// Two kinds of request (see `NotificationKind`):
+/// - `.info`: the original reveal-then-exit notification (no category, no buttons).
+/// - `.permission`: an Alerts-style notification carrying the `"pesterm.permission"`
+///   category with Approve/Deny actions. Tapping Approve/Deny resolves (prints the
+///   honored decision JSON + exit 0); a BODY click REVEALS the iTerm2 tab WITHOUT
+///   resolving so the still-blocking run loop keeps waiting for a decision or the 120s
+///   fail-safe. The fail-safe is armed at `post()` entry (before `requestAuthorization`)
+///   so a never-answered first-run auth prompt still falls back. A one-shot `ResolvedGate`
+///   guarantees exactly one of {action tap, fail-safe} finalizes.
+///
 /// Dismiss caveat: UNUserNotificationCenter has NO reliable callback for a user
 /// MANUALLY dismissing a delivered notification, so there is no dismiss-driven early
-/// exit. The 600s safety cap (+ withdraw) is the SOLE backstop when neither a click
-/// nor the cap's own timeout fires.
+/// exit. The 600s safety cap (info) / 120s fail-safe (permission) are the backstops.
 final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNotificationCenterDelegate {
 
     static let maxLifetimeSeconds: TimeInterval = 600
 
-    private var onActivate: (() -> Void)?
+    private var onActivate: ((String?) -> Void)?
     private var deliveredIdentifier: String?
     private var capTimer: Timer?
 
-    func post(_ request: NotificationRequest, onActivate: @escaping () -> Void) throws {
+    /// Permission-path state.
+    private var requestKind: NotificationKind = .info
+    private var failSafeTimer: Timer?
+    private let gate = ResolvedGate()
+
+    func post(_ request: NotificationRequest,
+              onActivate: @escaping (String?) -> Void) throws {
         self.onActivate = onActivate
+        self.requestKind = request.kind
+
+        // PERMISSION: arm the 120s fail-safe FIRST, before requestAuthorization, so an
+        // unanswered first-run auth prompt still falls back (the auth-gap fix). On fire:
+        // emit NOTHING + exit 0 (terminal fallback), never auto-allow. Guarded by the
+        // one-shot gate so it cannot also run after an Approve/Deny tap.
+        if request.kind == .permission {
+            let identifier = request.groupID ?? UUID().uuidString
+            self.deliveredIdentifier = identifier
+            let timer = Timer.scheduledTimer(
+                withTimeInterval: PermissionFlow.timeoutSeconds,
+                repeats: false
+            ) { [weak self] _ in
+                guard let self = self, self.gate.tryResolve() else { return }
+                self.removePermissionNotification()
+                // Emit nothing; just flush + exit 0 for the terminal fallback.
+                fflush(stdout)
+                exit(0)
+            }
+            self.failSafeTimer = timer
+        }
 
         let center = UNUserNotificationCenter.current()
         // Set the delegate BEFORE scheduling any request.
         center.delegate = self
+
+        // PERMISSION: register the Approve/Deny category on the SAME center instance,
+        // BEFORE add(...). Info posts NO category (unchanged).
+        if request.kind == .permission {
+            center.setNotificationCategories([Self.permissionCategory()])
+        }
 
         center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
             // Proceed once authorization returns. On denial we degrade to whatever the
@@ -36,11 +78,35 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         }
     }
 
+    /// The Approve/Deny category for `.permission` notifications. Approve is the primary
+    /// action, Deny second (a banner supports two). Action buttons require the Alerts
+    /// presentation style — a documented manual grant (see SETUP.md / DESIGN.md).
+    static func permissionCategory() -> UNNotificationCategory {
+        let approve = UNNotificationAction(
+            identifier: PermissionFlow.approveActionIdentifier,
+            title: "Approve",
+            options: []
+        )
+        let deny = UNNotificationAction(
+            identifier: PermissionFlow.denyActionIdentifier,
+            title: "Deny",
+            options: [.destructive]
+        )
+        return UNNotificationCategory(
+            identifier: PermissionFlow.categoryIdentifier,
+            actions: [approve, deny],
+            intentIdentifiers: [],
+            options: []
+        )
+    }
+
     /// PURE: build the notification content for a request. No scheduling, no auth, no
     /// timer — pulled out so the banner's shape (title/subtitle/body/sound) is
-    /// unit-testable without posting. No action button is added: UN shows none by
-    /// default (no UNNotificationCategory registered), so the whole banner body is the
-    /// click target → `.contentsClicked` → reveal.
+    /// unit-testable without posting.
+    ///
+    /// `.permission` sets `categoryIdentifier = "pesterm.permission"` so the Approve/Deny
+    /// actions render. `.info` leaves it empty: the whole banner body is the click target
+    /// → `.contentsClicked` → reveal (unchanged).
     static func makeContent(from request: NotificationRequest) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = request.title
@@ -51,6 +117,9 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         if let sound = request.sound {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(sound))
         }
+        if request.kind == .permission {
+            content.categoryIdentifier = PermissionFlow.categoryIdentifier
+        }
         return content
     }
 
@@ -58,7 +127,7 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         let content = Self.makeContent(from: request)
 
         // Use the group id as the request identifier so re-posts coalesce/replace.
-        let identifier = request.groupID ?? UUID().uuidString
+        let identifier = self.deliveredIdentifier ?? request.groupID ?? UUID().uuidString
         self.deliveredIdentifier = identifier
 
         let unRequest = UNNotificationRequest(
@@ -68,23 +137,36 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         )
         UNUserNotificationCenter.current().add(unRequest) { _ in }
 
-        // 600s cap is the SOLE dismiss backstop in the UN path (Md). Withdraw then exit.
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: Self.maxLifetimeSeconds,
-            repeats: false
-        ) { [weak self] _ in
-            if let id = self?.deliveredIdentifier {
-                UNUserNotificationCenter.current()
-                    .removeDeliveredNotifications(withIdentifiers: [id])
+        // INFO: 600s cap is the SOLE dismiss backstop (Md). Withdraw then exit. The
+        // PERMISSION path uses the 120s fail-safe armed in post() instead, so it does
+        // NOT arm this cap.
+        if request.kind == .info {
+            let timer = Timer.scheduledTimer(
+                withTimeInterval: Self.maxLifetimeSeconds,
+                repeats: false
+            ) { [weak self] _ in
+                if let id = self?.deliveredIdentifier {
+                    UNUserNotificationCenter.current()
+                        .removeDeliveredNotifications(withIdentifiers: [id])
+                }
+                exit(0)
             }
-            exit(0)
+            self.capTimer = timer
         }
-        self.capTimer = timer
+    }
+
+    /// Remove the delivered + pending permission notification for the current id.
+    private func removePermissionNotification() {
+        guard let id = deliveredIdentifier else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id])
     }
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Present even when frontmost.
+    /// Present even when frontmost. For `.permission` we still present so the Approve/Deny
+    /// action buttons render (this needs the Alerts system style — documented grant).
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -97,14 +179,51 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         }
     }
 
-    /// Click handling: run reveal in-process, then exit. Call the completion handler.
+    /// Interaction handling, branched on kind.
+    /// - INFO: in-process reveal, then exit (unchanged reveal-then-exit path).
+    /// - PERMISSION: Approve/Deny resolve (print decision JSON + exit 0); a BODY/default
+    ///   click REVEALS and RETURNS WITHOUT resolving (the run loop keeps waiting).
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         capTimer?.invalidate()
-        onActivate?()
+
+        if requestKind == .info {
+            onActivate?(response.actionIdentifier)
+            completionHandler()
+            exit(0)
+        }
+
+        // PERMISSION.
+        let decision = PermissionFlow.decision(forActionIdentifier: response.actionIdentifier)
+
+        guard let decision = decision else {
+            // Body click / default id / unknown: REVEAL and KEEP WAITING. Do NOT
+            // tryResolve(), do NOT exit, do NOT invalidate the fail-safe — the
+            // Alerts notification persists and the 120s timer keeps running.
+            onActivate?(response.actionIdentifier)
+            completionHandler()
+            return
+        }
+
+        // Approve / Deny: claim the one-shot resolution.
+        guard gate.tryResolve() else {
+            // The fail-safe already fired — do nothing (and it has exited).
+            completionHandler()
+            return
+        }
+        failSafeTimer?.invalidate()
+        // Let the closure observe the action too (parity with the info path); the
+        // permission closure does NOT reveal on an action id.
+        onActivate?(response.actionIdentifier)
+
+        if let json = PermissionDecision.outputJSON(for: decision) {
+            FileHandle.standardOutput.write(Data(json.utf8))
+        }
+        fflush(stdout)
+        removePermissionNotification()
         completionHandler()
         exit(0)
     }

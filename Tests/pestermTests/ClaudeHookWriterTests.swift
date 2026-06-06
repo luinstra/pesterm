@@ -47,13 +47,15 @@ final class ClaudeHookWriterTests: XCTestCase {
         }
     }
 
-    // 1. wire into empty/missing → exactly one matcher-less entry with --adapter claude.
+    // 1. wire into empty/missing → exactly one entry with --adapter claude carrying the
+    //    default (approvals-off) notification_type matcher.
     func testWireIntoMissingCreatesSingleEntry() throws {
         let s = try wire(path(), command: "/usr/local/bin/pesterm")
         let entries = notificationEntries(s)
         XCTAssertEqual(entries.count, 1)
-        // Matcher-less: the entry has NO "matcher" key.
-        XCTAssertNil((entries[0] as? [String: Any])?["matcher"])
+        // The default writer carries the full notification_type matcher.
+        XCTAssertEqual((entries[0] as? [String: Any])?["matcher"] as? String,
+                       ClaudeHookWriter.handledNotificationTypes)
         XCTAssertEqual(commands(in: entries), ["'/usr/local/bin/pesterm' --adapter claude"])
     }
 
@@ -286,11 +288,32 @@ final class ClaudeHookWriterTests: XCTestCase {
         XCTAssertEqual(ClaudeHookWriter.shellArg("a$b"), "'a$b'")
     }
 
-    // Registry sanity.
+    // 17. isMine is token-bounded: it matches `--adapter claude` and
+    //     `--adapter claude --sound Glass`, but NOT `--adapter claude-permission` (the
+    //     PermissionRequest hook), so the two hooks never cross-match.
+    func testIsMineTokenBoundary() {
+        let plain: [String: Any] = ["hooks": [["type": "command",
+            "command": "'/bin/pesterm' --adapter claude"]]]
+        let withSound: [String: Any] = ["hooks": [["type": "command",
+            "command": "'/bin/pesterm' --adapter claude --sound Glass"]]]
+        let permission: [String: Any] = ["hooks": [["type": "command",
+            "command": "'/bin/pesterm' --adapter claude-permission"]]]
+        XCTAssertTrue(writer.isMine(plain), "still matches the bare flag")
+        XCTAssertTrue(writer.isMine(withSound), "still matches the --sound form")
+        XCTAssertFalse(writer.isMine(permission), "must NOT match the permission flag")
+    }
+
+    // Registry sanity. writer(for:) returns the Notification (ClaudeHookWriter) first;
+    // supportedAgents lists claude ONCE despite two writers.
     func testRegistry() {
-        XCTAssertNotNil(HookWriterRegistry.writer(for: "claude"))
-        XCTAssertNotNil(HookWriterRegistry.writer(for: "CLAUDE"))
+        XCTAssertTrue(HookWriterRegistry.writer(for: "claude") is ClaudeHookWriter)
+        XCTAssertTrue(HookWriterRegistry.writer(for: "CLAUDE") is ClaudeHookWriter)
         XCTAssertNil(HookWriterRegistry.writer(for: "codex"))
         XCTAssertEqual(HookWriterRegistry.supportedAgents, ["claude"])
+        // Two writers for claude: Notification + PermissionRequest.
+        let writers = HookWriterRegistry.writers(for: "claude")
+        XCTAssertEqual(writers.count, 2)
+        XCTAssertEqual(Set(writers.map { $0.hookEvent }),
+                       ["Notification", "PermissionRequest"])
     }
 }

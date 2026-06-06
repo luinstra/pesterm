@@ -29,10 +29,15 @@ pesterm status
    authorization grant). Click **Allow**. If you deny it, banners are suppressed until
    you re-enable pesterm under **System Settings → Notifications → pesterm**.
 
-2. **Notification style = Alerts.** Banners auto-dismiss and kill the click, so the
-   reveal never fires. Open **System Settings → Notifications → pesterm** and set the
-   style to **Alerts** (this is separate from the allow-prompt above — granting
-   notifications doesn't pick the style for you).
+2. **Alert Style = Persistent.** A temporary notification auto-dismisses and kills the
+   click, so the reveal never fires. Open **System Settings → Notifications → pesterm**
+   and set **Alert Style** to **Persistent** (macOS renamed the old "Banners / Alerts"
+   choice to "Temporary / Persistent"; this is separate from the allow-prompt above —
+   granting notifications doesn't pick the style for you). **A Persistent alert style is
+   also LOAD-BEARING for the tool-approval Approve/Deny actions** (see below): on macOS
+   (Big Sur+) those actions appear under the notification's **"Options"** affordance, not
+   as always-visible inline buttons — that's expected macOS behavior. `pesterm status`
+   reminds you to set it.
 
 3. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
    ScriptingBridge (i.e. the first time you click a notification and it reveals), macOS
@@ -49,14 +54,15 @@ pesterm status
 pesterm wire claude --yes --command-path "$PREFIX/bin/pesterm"
 ```
 
-which idempotently merges this single matcher-less entry into
-`~/.claude/settings.json`, preserving every unrelated hook:
+which idempotently merges this single entry into `~/.claude/settings.json`, preserving
+every unrelated hook:
 
 ```json
 {
   "hooks": {
     "Notification": [
       {
+        "matcher": "idle_prompt|permission_prompt|elicitation_dialog",
         "hooks": [
           {
             "type": "command",
@@ -71,10 +77,17 @@ which idempotently merges this single matcher-less entry into
 
 The hook command is the stable `$PREFIX/bin/pesterm` path (a `bash` `exec` wrapper
 that runs the inner bundle binary, so notifications post under the bundle identity —
-a bare symlink would NOT). No per-event `matcher` entries are needed — the adapter
-branches on `notification_type` itself (`permission_prompt` / `idle_prompt` /
-`elicitation_dialog`; `auth_success` and any unknown type are suppressed for prototype
-parity).
+a bare symlink would NOT). The `Notification` matcher filters on `notification_type`
+(`|` = OR), so pesterm only fires on the types it handles (`idle_prompt` /
+`permission_prompt` / `elicitation_dialog`; `auth_success` and any unknown type are
+suppressed for prototype parity). When tool approvals are wired (see below),
+`permission_prompt` is OMITTED from this matcher — the `PermissionRequest` approval hook
+owns that event, so you never get two banners for one permission:
+
+```json
+{ "matcher": "idle_prompt|elicitation_dialog",
+  "hooks": [{ "type": "command", "command": "…/pesterm --adapter claude" }] }
+```
 
 To wire/unwire by hand, or to point at a different settings file:
 
@@ -90,6 +103,62 @@ and exit without touching anything — they never hang. A malformed settings fil
 refused (non-zero exit, file untouched). A backup
 (`settings.json.bak-YYYYMMDD-HHMMSS`) is written only when content actually changes.
 
+## Tool approvals (Approve/Deny from a notification) — ON by default
+
+`pesterm wire claude` registers TWO hooks: the `Notification` hook above AND a blocking
+`PermissionRequest` tool-approval hook. When Claude is about to prompt for tool
+permission, pesterm posts a **Persistent-style notification with Approve / Deny actions**
+(on macOS Big Sur+ these appear under the notification's **"Options"** affordance, not as
+always-visible inline buttons). The body shows the action (the Bash command, or the real
+path/url for other tools); the title/subtitle carry the tool name + short session id.
+Tapping **Approve** allows the tool, tapping **Deny** denies it — and the terminal
+`1.Yes/2.No` menu is suppressed. Because approvals own `permission_prompt`, the
+`Notification` hook's matcher drops that type when both are wired (no double banner).
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.local/bin/pesterm --adapter claude-permission" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- **Body click reveals WITHOUT deciding.** Click the notification BODY (not a button) to
+  reveal the iTerm2 tab and read the full context in the terminal; the notification
+  PERSISTS, so you can then tap Approve/Deny or let it time out. A body click never
+  resolves the request.
+- **120s timeout / error / first-run auth gap → terminal fallback, NEVER auto-allow.** If
+  you don't respond within 120 seconds (or pesterm errors, or the first-run notification
+  auth prompt sits unanswered), pesterm emits nothing and Claude falls back to its own
+  terminal prompt. Silence is never an approval.
+- **Disable approvals:** wire only the Notification hook with `--no-approvals`:
+
+  ```sh
+  pesterm wire claude --yes --no-approvals
+  ```
+
+  When approvals are wired, `wire` prints a LOUD one-time consent notice telling you
+  they're on and how to disable them.
+
+### ⚠ Subagent warning — pesterm does NOT mediate subagent tool calls
+
+pesterm does NOT mediate **subagent / Agent-Teams** tool calls — those still use Claude's
+normal terminal prompts (upstream #23983). **Silence is NOT safety:** if you don't see a
+pesterm Approve/Deny notification for a tool call, it does not mean the call was blocked —
+it may be a subagent prompting in the terminal instead. This matters because approvals are
+on by default.
+
+### Interactive-only
+
+The `PermissionRequest` hook fires only in an interactive Claude Code session. Headless
+`claude -p "…"` does NOT trigger it (only `PreToolUse`), so approvals do nothing there.
+
 ## Verify
 
 ```sh
@@ -97,8 +166,9 @@ pesterm status
 ```
 
 reports the bundle install path, the CLI entry + on-`PATH` state, the wired state for
-each supported agent (with the command path and a **stale** flag if that path no
-longer exists), the running process's bundle identity, and the manual-grant reminders.
+each supported agent — listing `claude` once with a per-event breakdown (`Notification`
+and `PermissionRequest`), each with its command path and a **stale** flag if that path no
+longer exists — the running process's bundle identity, and the manual-grant reminders.
 
 ## Event mapping (parity with the bash prototype)
 
@@ -142,7 +212,7 @@ only the classic `/System/Library/Sounds` set and custom-dir sounds resolve by n
 
 ## Known wrinkles
 
-1. **Alerts style is mandatory** (grant #2 above) — banners kill the click.
+1. **Persistent Alert Style is mandatory** (grant #2 above) — a temporary alert kills the click.
 2. **One-time iTerm2 control grant** (grant #3 above).
 3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle cdhash, so a
    rebuild + reinstall changes the hash and re-triggers the "control iTerm2" prompt.

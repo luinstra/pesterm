@@ -29,4 +29,30 @@ final class UNUserNotificationBackendTests: XCTestCase {
         let c = UNUserNotificationBackend.makeContent(from: req)
         XCTAssertEqual(c.subtitle, "")
     }
+
+    // INFO content leaves categoryIdentifier empty (no action buttons; whole body is
+    // the click target → reveal). This guards the unchanged info path.
+    func testInfoContentHasEmptyCategory() {
+        let req = NotificationRequest(title: "t", body: "b", kind: .info)
+        let c = UNUserNotificationBackend.makeContent(from: req)
+        XCTAssertEqual(c.categoryIdentifier, "")
+    }
+
+    // PERMISSION content sets the pesterm.permission category so Approve/Deny render.
+    func testPermissionContentHasPermissionCategory() {
+        let req = NotificationRequest(title: "t", body: "b", kind: .permission)
+        let c = UNUserNotificationBackend.makeContent(from: req)
+        XCTAssertEqual(c.categoryIdentifier, "pesterm.permission")
+    }
+
+    // The permission category carries exactly [Approve, Deny] in that order.
+    func testPermissionCategoryActions() {
+        let cat = UNUserNotificationBackend.permissionCategory()
+        XCTAssertEqual(cat.identifier, "pesterm.permission")
+        XCTAssertEqual(cat.actions.count, 2)
+        XCTAssertEqual(cat.actions[0].identifier, "pesterm.approve")
+        XCTAssertEqual(cat.actions[0].title, "Approve")
+        XCTAssertEqual(cat.actions[1].identifier, "pesterm.deny")
+        XCTAssertEqual(cat.actions[1].title, "Deny")
+    }
 }

@@ -77,19 +77,23 @@ struct StatusCommand: ParsableCommand {
         print("")
         print("Hook wired state:")
         for agentName in HookWriterRegistry.supportedAgents {
-            guard let writer = HookWriterRegistry.writer(for: agentName) else { continue }
-            let path = settings ?? writer.settingsPath
+            let writers = HookWriterRegistry.writers(for: agentName)
+            guard let first = writers.first else { continue }
+            let path = settings ?? first.settingsPath
             do {
                 let s = try SettingsMerger.load(path: path)
-                let entries = ((s["hooks"] as? [String: Any])?[writer.hookEvent] as? [Any]) ?? []
-                let mine = entries.filter { writer.isMine($0) }
-                if mine.isEmpty {
-                    print("  \(agentName): not wired  (\(path))")
-                } else {
-                    let cmd = Self.firstCommand(in: mine[0]) ?? "<unknown>"
-                    let stale = Self.commandPathMissing(cmd)
-                    print("  \(agentName): wired      (\(path))")
-                    print("           command: \(cmd)\(stale ? "  (STALE: path not found)" : "")")
+                print("  \(agentName): (\(path))")
+                for writer in writers {
+                    let entries = ((s["hooks"] as? [String: Any])?[writer.hookEvent] as? [Any]) ?? []
+                    let mine = entries.filter { writer.isMine($0) }
+                    if mine.isEmpty {
+                        print("    \(writer.hookEvent): not wired")
+                    } else {
+                        let cmd = Self.firstCommand(in: mine[0]) ?? "<unknown>"
+                        let stale = Self.commandPathMissing(cmd)
+                        print("    \(writer.hookEvent): wired")
+                        print("      command: \(cmd)\(stale ? "  (STALE: path not found)" : "")")
+                    }
                 }
             } catch {
                 print("  \(agentName): error loading \(path): \(error)")

@@ -208,13 +208,19 @@ fi
 
 # Self-wire the Claude Code hook.
 #
+#   `wire claude` registers BOTH hooks by default: the Notification hook AND the
+#   blocking tool-approval (PermissionRequest) hook. wire's own summary PRINTS a LOUD
+#   one-time consent notice when approvals are wired (surfaced in this install output).
+#   To install WITHOUT tool approvals, add --no-approvals to the wire command below
+#   (or run `pesterm wire claude --no-approvals` afterward).
+#
 #   NOTE: NSHomeDirectory() resolves the real user home via getpwuid() and IGNORES
 #   $HOME for a non-sandboxed binary, so `wire` always targets the real
 #   ~/.claude/settings.json by default. For a SAFE install dry-run against a temp
 #   settings file, set PESTERM_SETTINGS to redirect the wire target (test-only; unset
 #   in normal use so production wires the real file). We always INVOKE wire through the
 #   known-good $SYMLINK; only the baked --command-path value varies.
-echo "==> Wiring Claude Code hook (--command-path $CMD_PATH)"
+echo "==> Wiring Claude Code hooks (--command-path $CMD_PATH)"
 if [[ -n "${PESTERM_SETTINGS:-}" ]]; then
     echo "    (PESTERM_SETTINGS set → wiring into $PESTERM_SETTINGS instead of ~/.claude/settings.json)"
     "$SYMLINK" wire claude --yes --command-path "$CMD_PATH" --settings "$PESTERM_SETTINGS"

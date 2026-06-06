@@ -21,13 +21,17 @@ struct UnwireCommand: ParsableCommand {
     var settings: String?
 
     func run() throws {
-        guard let writer = HookWriterRegistry.writer(for: agent) else {
+        let writers = HookWriterRegistry.writers(for: agent)
+        guard !writers.isEmpty else {
             Wiring.fail("unknown agent '\(agent)'. Supported: \(HookWriterRegistry.supportedAgents.joined(separator: ", "))",
                         code: 2)
         }
 
-        let targetPath = settings ?? writer.settingsPath
+        // All writers for an agent share a settings path; use the first.
+        let targetPath = settings ?? writers[0].settingsPath
 
+        // load-once / remove each writer's event / write-once => always remove BOTH
+        // events (Notification + PermissionRequest) in a single backup.
         let current: [String: Any]
         do {
             current = try SettingsMerger.load(path: targetPath)
@@ -35,12 +39,14 @@ struct UnwireCommand: ParsableCommand {
             Wiring.fail("\(error)", code: 1)
         }
 
-        let proposed: [String: Any]
-        do {
-            proposed = try SettingsMerger.remove(current, event: writer.hookEvent,
-                                                 isMine: writer.isMine)
-        } catch {
-            Wiring.fail("\(error)", code: 1)
+        var proposed = current
+        for writer in writers {
+            do {
+                proposed = try SettingsMerger.remove(proposed, event: writer.hookEvent,
+                                                     isMine: writer.isMine)
+            } catch {
+                Wiring.fail("\(error)", code: 1)
+            }
         }
 
         if Wiring.equalSettings(current, proposed) {

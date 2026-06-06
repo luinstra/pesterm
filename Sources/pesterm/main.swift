@@ -22,7 +22,8 @@ private func buildRequestAndRevealer() -> (NotificationRequest, TerminalRevealer
         // Optional `--sound <name>` (or `--sound=<name>`) OVERRIDES the event's default
         // sound for whatever events this hook entry handles.
         let soundOverride = soundArgument(in: args)
-        return buildFromAdapter(adapterValue, soundOverride: soundOverride, revealer: revealer)
+        return buildFromAdapter(adapterValue, soundOverride: soundOverride,
+                                revealer: revealer)
     }
 
     // Standard parse: `post` subcommand builds the request. `--help` / errors are
@@ -106,9 +107,17 @@ private func soundArgument(in args: [String]) -> String? {
 
 /// Adapter mode: read ALL of stdin (readDataToEndOfFile — returns at EOF incl. empty;
 /// V4), map to a request, or exit 0 on suppress/unknown (C3).
-private func buildFromAdapter(_ adapter: String, soundOverride: String?, revealer: TerminalRevealer?)
+private func buildFromAdapter(_ adapter: String, soundOverride: String?,
+                              revealer: TerminalRevealer?)
     -> (NotificationRequest, TerminalRevealer?) {
-    guard adapter == "claude" else {
+    // Two-way branch: the existing `claude` Notification adapter, or the new
+    // `claude-permission` blocking PermissionRequest adapter. Anything else exits 2.
+    switch AdapterDispatch.route(for: adapter) {
+    case .info:
+        break // fall through to the existing claude path below.
+    case .permission:
+        return buildPermissionRequest(revealer: revealer)
+    case .unknown:
         FileHandle.standardError.write(
             Data("pesterm: unknown adapter '\(adapter)'\n".utf8))
         exit(2)
@@ -137,6 +146,33 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?, reveale
             FileHandle.standardError.write(
                 Data("pesterm: unknown notification_type '\(type)' suppressed\n".utf8))
         }
+        exit(0)
+    }
+
+    return (request, revealer)
+}
+
+/// Permission adapter mode: read stdin, parse the PermissionRequest hook JSON, and build
+/// the `.permission` request that reaches `app.run()` (heeding the main.swift GUARD NOTE
+/// — it returns a request so the keep-alive/AppDelegate/backend machinery runs). On
+/// empty/invalid JSON, emit NOTHING + exit 0 so Claude falls back to its terminal prompt.
+private func buildPermissionRequest(revealer: TerminalRevealer?)
+    -> (NotificationRequest, TerminalRevealer?) {
+    // Read stdin BEFORE NSApp.run() (PP1). readDataToEndOfFile returns at EOF.
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+
+    guard let payload = ClaudePermissionAdapter.parse(data) else {
+        FileHandle.standardError.write(
+            Data("pesterm: empty or invalid Claude PermissionRequest JSON; nothing posted\n".utf8))
+        exit(0)
+    }
+
+    let iTermSessionId = iTermSessionIdFromEnv()
+
+    guard let request = ClaudePermissionAdapter.buildRequest(from: payload,
+                                                             iTermSessionId: iTermSessionId) else {
+        FileHandle.standardError.write(
+            Data("pesterm: nothing approvable in PermissionRequest; nothing posted\n".utf8))
         exit(0)
     }
 

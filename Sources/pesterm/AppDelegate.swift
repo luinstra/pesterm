@@ -21,8 +21,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            try backend.post(request) { [revealer] in
-                // Click handler: in-process reveal, then the backend exits.
+            try backend.post(request) { [request, revealer] actionIdentifier in
+                // Click handler. For BOTH kinds, a body/default (or unknown) click
+                // reveals the terminal:
+                //  - INFO: the backend reveals then exits (unchanged).
+                //  - PERMISSION: the backend reveals on a body click then RETURNS
+                //    without resolving (keeps waiting); Approve/Deny do NOT reveal.
+                // For the permission path, only a non-decision id should reveal — the
+                // backend already gates Approve/Deny before invoking this closure for a
+                // decision, but we double-guard here so an action tap never reveals.
+                if request.kind == .permission,
+                   PermissionFlow.decision(forActionIdentifier: actionIdentifier) != nil {
+                    return
+                }
                 guard let revealer = revealer else { return }
                 do {
                     try revealer.reveal()

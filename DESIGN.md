@@ -47,8 +47,9 @@ native rewrite dissolves three of them:
    no `~/.local/bin`) — shelling to `uv`/Python broke silently. → The click
    handler runs **in-process Swift**; the entire `-execute → reveal.sh → uv →
    iterm2_reveal.py` chain collapses into one method.
-4. **Banners auto-dismiss; Alerts persist** — the click needs Alerts style. →
-   Still a user setting; documented, unavoidable.
+4. **Temporary alerts auto-dismiss; Persistent alerts stay** — the click needs the
+   Persistent Alert Style (macOS renamed "Banners / Alerts" to "Temporary / Persistent").
+   → Still a user setting; documented, unavoidable.
 
 ## 5. Architecture
 
@@ -183,11 +184,108 @@ pesterm post \
 ## 11. Gotchas to preserve (don't regress)
 
 - **Automation TCC** prompt the first time we drive iTerm2 via ScriptingBridge — one-time grant.
-- **Notification permission** + set the app's notification style to **Alerts**
-  (Banners auto-dismiss and kill the click).
+- **Notification permission** + set the app's **Alert Style** to **Persistent**
+  (a temporary alert auto-dismisses and kills the click; macOS renamed "Banners / Alerts"
+  to "Temporary / Persistent").
 - **Banner icon = posting bundle**; can't override per-notification.
 - **`ITERM_SESSION_ID` is inherited from the agent's env** — reveal reads env, never the payload.
 - **The app must outlive the post** to handle the click; model the keep-alive explicitly.
+
+## 11a. Tool approvals (blocking `PermissionRequest` hook) — NOTIFICATION-BUTTONS v1
+
+pesterm can act as a **blocking** Claude Code `PermissionRequest` hook. When Claude is
+about to prompt for tool permission, the hook fires and pesterm posts a **Persistent-style
+notification with action buttons** — **Approve** (primary) and **Deny** (second). On
+macOS (Big Sur+) these actions appear under the notification's **"Options"** affordance,
+NOT as always-visible inline buttons — that's expected macOS behavior, not a bug. The
+body shows the approvable action; the title/subtitle carry the tool name + short session
+id so overlapping sessions are distinguishable. Tapping Approve/Deny prints the honored
+decision JSON and exits 0, which Claude obeys and which SUPPRESSES the terminal
+`1.Yes/2.No` menu. Because this hook owns `permission_prompt`, the `Notification` hook's
+`notification_type` matcher drops that type when both are wired, so one permission never
+yields two banners. **There is NO modal anywhere — a focus-stealing modal would defeat
+pesterm's "pester you in place" purpose.**
+
+### Decision contract (LOCKED)
+
+```
+allow  -> {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
+deny   -> {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}
+timeout/error/crash -> emit NOTHING (Claude falls back to its terminal prompt)
+```
+
+Deny is JSON `behavior:"deny"` with **exit 0** — NOT exit 2. EVERY outcome exits 0.
+There is no `updatedInput`, no `always` ("don't ask again" is not in v1).
+
+### Body click = REVEAL, not resolve
+
+A body click on the PERMISSION notification REVEALS the iTerm2 tab (via the EXISTING
+revealer) so you can read the full context in the terminal, then **RETURNS without
+resolving** — the run loop stays alive (still blocking) so you can come back and tap
+Approve/Deny, or let it time out. This is the key behavioral difference from the INFO
+notification, which exits after reveal. Gated by `NotificationRequest.kind == .permission`.
+
+### Mechanism
+
+- **`kind: NotificationKind { case info, permission }`** on `NotificationRequest` gates
+  the `categoryIdentifier`, the `willPresent` style, and the body-click behavior.
+- **Category:** a `UNNotificationCategory` (`"pesterm.permission"`) with two
+  `UNNotificationAction`s, Approve then Deny, registered via `setNotificationCategories`
+  on the SAME center instance, BEFORE `add(...)`, ONLY on the permission path. Info posts
+  no category (unchanged — the whole body is the reveal click target).
+- **Reuses the existing keep-alive:** the permission path goes through the same
+  request-building return + `app.run()` + `AppDelegate` + delegate machinery as the
+  `claude` path — only the delegate branches on `kind` + the response action id.
+- **120s fail-safe** armed at `post()` ENTRY, BEFORE `requestAuthorization` (the auth-gap
+  fix — a never-answered first-run auth prompt still falls back). On fire: emit nothing,
+  exit 0, terminal fallback — NEVER an auto-allow. Well under the 600s UN max lifetime
+  and Claude's 600s hook timeout.
+- **One-shot `ResolvedGate`:** an Approve/Deny tap and the 120s timer both want to
+  finalize; an atomic check-and-set makes exactly one win (no double-emit, no
+  late-timer-after-tap).
+- **Stale cleanup:** on resolve OR timeout the delivered/pending notification for the id
+  is removed.
+- **Distinct group prefix `claude-perm-<guid>`** (the info stream is `claude-<guid>`) so
+  the two notification streams never coalesce — the UN backend uses the groupID directly
+  as the request identifier.
+- **`approvableText` shows the real target:** the Bash command verbatim; for non-Bash
+  tools a concise but TRUTHFUL summary of the real path/url/etc (e.g. `Write <file_path>`,
+  `WebFetch <url>`) — never a target-hiding generic like `"<tool> permission"`.
+
+### Wiring
+
+`wire claude` registers BOTH the `Notification` and `PermissionRequest` hooks by default.
+The `HookWriterRegistry` returns a deduped LIST of writers per agent; `wire`/`unwire`/
+`status` iterate it (load-once / fold-each / write-once → single backup, preserved
+idempotency). `--no-approvals` wires ONLY the Notification hook. A LOUD one-time consent
+notice prints in the `wire` summary (and the install output) when approvals are wired.
+`ClaudeHookWriter.isMine` is token-bounded so `--adapter claude` (incl.
+`--adapter claude --sound Glass`) matches but `--adapter claude-permission` does not
+cross-match.
+
+### Known gaps
+
+- **Action buttons require the Persistent Alert Style** (documented manual grant;
+  `pesterm status` flags it). On macOS (Big Sur+) the Approve/Deny actions live under the
+  notification's **"Options"** affordance, not as always-visible inline buttons — expected
+  macOS behavior. Without the Persistent style the actions may not surface — the body-click
+  reveal + 120s timeout remain the safe fallback (still no auto-allow).
+- **Subagent / Agent-Teams tool calls bypass these hooks (#23983)** — they still use
+  Claude's normal terminal prompts. **Silence is NOT safety.**
+- **Interactive-only:** `PermissionRequest` does not fire under headless `claude -p`
+  (only `PreToolUse`); approvals do nothing there.
+- **Long commands truncate in the banner body** — accepted; the body-click reveal is the
+  "see more" path.
+
+### Deferred to v2 (do NOT build in v1)
+
+A "tap to see more" expanded view (beyond the body-click reveal) and an **Always /
+don't-ask-again** grant (`permission_suggestions`) are possible future adds — NOT v1.
+Any "Always" reintroduction needs a spike proving the exact apply schema. An earlier
+dynamic-by-fit / modal escalation idea is shelved: v1 accepts banner truncation. If a
+future spike revisits escalation, recall that "fits the banner" proves VISIBILITY not
+SAFETY — a short dangerous command must not get a frictionless one-tap, so any escalation
+must be dangerous-token driven, not length driven.
 
 ## 12. Roadmap
 

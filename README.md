@@ -13,6 +13,26 @@ self-contained Swift app — no `terminal-notifier` clone, no `uv`, no Python. T
 whole `-execute → reveal.sh → uv → python` chain collapses into one in-process
 Swift method.
 
+### Tool approvals (Approve / Deny from a notification)
+
+For Claude Code, pesterm can also be a **blocking tool-approval** hook: when Claude is
+about to prompt for tool permission, pesterm posts a **Persistent notification with
+Approve / Deny actions** showing the command (or the real path/url for non-Bash tools).
+On macOS (Big Sur+) the Approve/Deny actions appear under the notification's **"Options"**
+affordance, not as always-visible inline buttons — that's expected macOS behavior. Tap
+**Approve** to allow, **Deny** to deny — no terminal `1.Yes/2.No` menu. Because approvals
+own `permission_prompt`, the plain `Notification` hook's matcher drops that type when both
+are wired, so one permission never produces two banners. Click the
+notification **body** to reveal the terminal and read the full context WITHOUT deciding
+(the notification persists; you can still tap a button or let it time out). If you don't
+respond within 120 seconds — or on any error — pesterm falls back to Claude's terminal
+prompt and **never auto-allows**.
+
+Approvals are **on by default** (`pesterm wire claude`); disable with
+`pesterm wire claude --no-approvals`. The `PermissionRequest` hook is **interactive-only**
+(it doesn't fire under headless `claude -p`), and pesterm does NOT mediate **subagent**
+tool calls — those still prompt in the terminal (#23983). See **[SETUP.md](./SETUP.md)**.
+
 See **[DESIGN.md](./DESIGN.md)** for the architecture and roadmap, and
 **[SETUP.md](./SETUP.md)** for the one-time GUI grants.
 
@@ -48,17 +68,18 @@ changed and never creates a redundant backup.
 
 | Command | What it does |
 |---------|--------------|
-| `pesterm wire <agent>` | Idempotently merge pesterm's hook into the agent's settings. |
-| `pesterm unwire <agent>` | Remove **only** pesterm's hook entry; never touches unrelated hooks. |
-| `pesterm status` | Report bundle path, CLI entry + on-`PATH` state, per-agent wired state (with the command path + a stale flag), running bundle identity, and the manual grants. |
+| `pesterm wire <agent>` | Idempotently merge pesterm's hooks into the agent's settings (Notification + tool-approval; `--no-approvals` for Notification only). |
+| `pesterm unwire <agent>` | Remove **only** pesterm's hook entries (both events); never touches unrelated hooks. |
+| `pesterm status` | Report bundle path, CLI entry + on-`PATH` state, per-agent wired state (listed once, with a per-event breakdown + a stale flag), running bundle identity, and the manual grants. |
 | `pesterm post --message ...` | Post a notification directly (used by the adapters internally). |
 | `pesterm sounds` | List the valid `--sound` names from the standard macOS Sounds dirs (system + your customs). |
 | `pesterm sample <name>` | Play a sound by name to audition it before wiring. |
 
 Supported agent today: `claude`. Useful flags: `--yes` (skip the confirm prompt),
+`--no-approvals` (wire only the Notification hook, omitting the tool-approval hook),
 `--settings <path>` (override the target settings file), `--command-path <path>`
 (pin the path written into the hook), `--sound <name>` (override the notification
-sound in the wired hook — see below).
+sound in the wired hook — see below; the tool-approval hook ignores `--sound`).
 
 ### Sounds
 
@@ -116,9 +137,10 @@ rm -rf "$HOME/.local/share/pesterm/pesterm.app" "$HOME/.local/bin/pesterm"
 
 ## Known wrinkles
 
-1. **Notification style must be Alerts.** Banners auto-dismiss and kill the click, so
-   the reveal never fires. Set **System Settings → Notifications → pesterm →
-   Alerts** once. (See SETUP.md.)
+1. **Alert Style must be Persistent.** A temporary alert auto-dismisses and kills the
+   click, so the reveal never fires. Set **System Settings → Notifications → pesterm →
+   Alert Style → Persistent** once (macOS renamed "Banners / Alerts" to
+   "Temporary / Persistent"). (See SETUP.md.)
 2. **One-time "control iTerm2" grant.** The first reveal triggers a TCC prompt; click
    OK once.
 3. **TCC re-prompt on rebuild.** Ad-hoc signatures key off the bundle's cdhash, so a
