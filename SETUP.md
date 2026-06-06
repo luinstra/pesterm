@@ -11,9 +11,11 @@ scripts/install.sh
 
 The installer builds the bundle, places it under `$PREFIX/share/pesterm`
 (default `PREFIX=$HOME/.local`, override with `PESTERM_PREFIX`), writes the
-`$PREFIX/bin/pesterm` CLI entry, verifies the bundle identity through it, and
-**self-wires the Claude Code hook for you** — no manual `~/.claude/settings.json`
-editing required. See [README.md](./README.md#install) for the full step list.
+`$PREFIX/bin/pesterm` CLI entry, verifies the bundle identity through it, and then
+**hands off to the guided `pesterm configure` flow** — which wires the Claude Code hooks
+for you (no manual `~/.claude/settings.json` editing) and reports/links the grants below.
+At a terminal it's interactive; with no TTY (`curl | bash` / CI) it applies defaults. See
+[README.md](./README.md#install) for the full step list.
 
 After installing, **restart Claude Code** so it reloads `~/.claude/settings.json`,
 then verify with:
@@ -46,12 +48,12 @@ pesterm status
    you deny it, reveal will be blocked until you re-enable pesterm under
    **System Settings → Privacy & Security → Automation**.
 
-## Claude Code hook wiring (done for you by the installer)
+## Claude Code hook wiring (done for you by `configure`)
 
-`scripts/install.sh` runs the equivalent of:
+`scripts/install.sh` hands off to the equivalent of:
 
 ```sh
-pesterm wire claude --yes --command-path "$PREFIX/bin/pesterm"
+pesterm configure claude --command-path "$PREFIX/bin/pesterm"
 ```
 
 which idempotently merges this single entry into `~/.claude/settings.json`, preserving
@@ -89,23 +91,23 @@ owns that event, so you never get two banners for one permission:
   "hooks": [{ "type": "command", "command": "…/pesterm --adapter claude" }] }
 ```
 
-To wire/unwire by hand, or to point at a different settings file:
+To (re)configure or unwire by hand, or to point at a different settings file:
 
 ```sh
-pesterm wire claude                              # interactive confirm
-pesterm wire claude --yes                         # no prompt
-pesterm wire claude --settings /path/to/settings.json
-pesterm unwire claude --yes                        # removes ONLY pesterm's entry
+pesterm configure claude                          # guided (prompts for approvals + sound)
+pesterm configure claude --yes                     # non-interactive: apply defaults
+pesterm unwire claude --yes                         # removes ONLY pesterm's entry
 ```
 
-In a non-TTY (e.g. CI) without `--yes`, `wire`/`unwire` print the `--yes` re-run hint
-and exit without touching anything — they never hang. A malformed settings file is
-refused (non-zero exit, file untouched). A backup
-(`settings.json.bak-YYYYMMDD-HHMMSS`) is written only when content actually changes.
+`configure` never hangs and never refuses: at a terminal it prompts; with no TTY (or
+`--yes`) it applies defaults. `unwire` without `--yes` in a non-TTY prints the `--yes`
+re-run hint and exits without touching anything. A malformed settings file is refused
+(non-zero exit, file untouched). A backup (`settings.json.bak-YYYYMMDD-HHMMSS`) is
+written only when content actually changes.
 
 ## Tool approvals (Approve/Deny from a notification) — ON by default
 
-`pesterm wire claude` registers TWO hooks: the `Notification` hook above AND a blocking
+`pesterm configure claude` registers TWO hooks: the `Notification` hook above AND a blocking
 `PermissionRequest` tool-approval hook. When Claude is about to prompt for tool
 permission, pesterm posts a **Persistent-style notification with Approve / Deny actions**
 (on macOS Big Sur+ these appear under the notification's **"Options"** affordance, not as
@@ -137,13 +139,18 @@ Tapping **Approve** allows the tool, tapping **Deny** denies it — and the term
   you don't respond within 120 seconds (or pesterm errors, or the first-run notification
   auth prompt sits unanswered), pesterm emits nothing and Claude falls back to its own
   terminal prompt. Silence is never an approval.
+- **Interactive tools are NOT mediated.** Tools whose own terminal UI is the point —
+  `AskUserQuestion`, `ExitPlanMode` — never produce an Approve/Deny banner (approving a
+  question just to then answer it is absurd). pesterm emits nothing and Claude handles
+  them natively. This is a denylist: every other tool, and any unknown tool, is mediated
+  by default.
 - **Disable approvals:** wire only the Notification hook with `--no-approvals`:
 
   ```sh
-  pesterm wire claude --yes --no-approvals
+  pesterm configure claude --yes --no-approvals
   ```
 
-  When approvals are wired, `wire` prints a LOUD one-time consent notice telling you
+  When approvals are wired, `configure` prints a LOUD one-time consent notice telling you
   they're on and how to disable them.
 
 ### ⚠ Subagent warning — pesterm does NOT mediate subagent tool calls
@@ -186,11 +193,11 @@ inherited `ITERM_SESSION_ID` (never the agent payload).
 
 ## Sounds (`--sound`, `pesterm sounds`, `pesterm sample`)
 
-The per-event defaults above can be overridden. Pass `--sound <name>` when wiring to
+The per-event defaults above can be overridden. Pass `--sound <name>` when configuring to
 bake the override into the hook command:
 
 ```sh
-pesterm wire claude --sound Glass     # → '…/pesterm' --adapter claude --sound Glass
+pesterm configure claude --sound Glass     # → '…/pesterm' --adapter claude --sound Glass
 ```
 
 When present, `--sound` replaces the default sound for whatever events that hook entry

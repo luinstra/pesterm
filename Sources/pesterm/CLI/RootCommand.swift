@@ -8,7 +8,7 @@ struct RootCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pesterm",
         abstract: "pesterm — your CLI agent pesters you back to the right terminal tab.",
-        subcommands: [PostCommand.self, WireCommand.self, UnwireCommand.self, StatusCommand.self,
+        subcommands: [PostCommand.self, ConfigureCommand.self, UnwireCommand.self, StatusCommand.self,
                       SoundsCommand.self, SampleCommand.self]
     )
 

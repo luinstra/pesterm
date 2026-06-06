@@ -4,8 +4,8 @@
 #
 # Builds the release binary, assembles + ad-hoc-signs the .app bundle, places it under
 # $PREFIX/share/pesterm, registers it with LaunchServices, symlinks $PREFIX/bin/pesterm,
-# self-wires the Claude Code hook, proves the bundle identity THROUGH the symlink, and
-# prints the manual GUI grants.
+# proves the bundle identity THROUGH the symlink, then HANDS OFF to `pesterm configure`
+# (the guided flow that wires the hooks and reports/links the manual GUI grants).
 #
 #   PREFIX defaults to $HOME/.local; override with PESTERM_PREFIX.
 #   No sudo. Idempotent — safe to re-run.
@@ -54,8 +54,15 @@ rm -rf "$OLD_APP"
 # 3. Build + assemble + sign + verify the STAGING bundle. ALL verification happens on
 #    the staging copy BEFORE we touch the existing install — a failure here leaves the
 #    prior working install completely intact (failure-atomic).
+# A failed `swift build` inside this command substitution must abort the install rather
+# than silently bundle a stale binary. `set -e` does NOT propagate out of $(...) on its
+# own (and `shopt -s inherit_errexit` needs bash 4.4+, but macOS ships bash 3.2), so we
+# guard the assignment explicitly — this works on stock /bin/bash.
 echo "==> Building release binary"
-BUILT_BIN="$(pesterm_build_release)"
+if ! BUILT_BIN="$(pesterm_build_release)"; then
+    echo "pesterm: build failed; aborting install (no stale binary shipped)." >&2
+    exit 1
+fi
 
 echo "==> Assembling bundle (staging at $STAGE_APP)"
 pesterm_assemble_bundle "$STAGE_APP" "$BUILT_BIN"
@@ -206,29 +213,9 @@ else
     CMD_PATH="$SYMLINK"
 fi
 
-# Self-wire the Claude Code hook.
-#
-#   `wire claude` registers BOTH hooks by default: the Notification hook AND the
-#   blocking tool-approval (PermissionRequest) hook. wire's own summary PRINTS a LOUD
-#   one-time consent notice when approvals are wired (surfaced in this install output).
-#   To install WITHOUT tool approvals, add --no-approvals to the wire command below
-#   (or run `pesterm wire claude --no-approvals` afterward).
-#
-#   NOTE: NSHomeDirectory() resolves the real user home via getpwuid() and IGNORES
-#   $HOME for a non-sandboxed binary, so `wire` always targets the real
-#   ~/.claude/settings.json by default. For a SAFE install dry-run against a temp
-#   settings file, set PESTERM_SETTINGS to redirect the wire target (test-only; unset
-#   in normal use so production wires the real file). We always INVOKE wire through the
-#   known-good $SYMLINK; only the baked --command-path value varies.
-echo "==> Wiring Claude Code hooks (--command-path $CMD_PATH)"
-if [[ -n "${PESTERM_SETTINGS:-}" ]]; then
-    echo "    (PESTERM_SETTINGS set → wiring into $PESTERM_SETTINGS instead of ~/.claude/settings.json)"
-    "$SYMLINK" wire claude --yes --command-path "$CMD_PATH" --settings "$PESTERM_SETTINGS"
-else
-    "$SYMLINK" wire claude --yes --command-path "$CMD_PATH"
-fi
-
-# 10. PATH report (ON_PATH already computed in step 9).
+# 10. PATH report (ON_PATH/CMD_PATH computed in step 9). Reported BEFORE configure so
+#     configure's summary (wired hooks + live grant state + Alert-Style FYI) is the LAST
+#     thing the user sees.
 echo "==> Checking PATH"
 if [[ "$ON_PATH" -eq 0 ]]; then
     echo "    $BIN_DIR is NOT on your PATH. Add this to your shell profile:"
@@ -238,20 +225,30 @@ if [[ "$ON_PATH" -eq 0 ]]; then
     echo "    (The hook is pinned to the absolute path $SYMLINK, so it fires regardless;"
     echo "     adding $BIN_DIR to PATH also lets you run \`pesterm\` directly.)"
 else
-    echo "    $BIN_DIR is on PATH — wired the hook as the bare command \`$BIN_NAME\`."
+    echo "    $BIN_DIR is on PATH — the hook is wired as the bare command \`$BIN_NAME\`."
 fi
 
-# 11. Manual GUI grants.
+# 11. Hand off to the guided `configure` flow. configure OWNS the setup UX: it wires both
+#     hooks (tool approvals ON by default), then reports LIVE grant state and offers to
+#     deep-link any missing System Settings pane. It runs INTERACTIVELY at a terminal and
+#     AUTO-DEGRADES to defaults when there's no TTY (curl|bash / CI) — so we do NOT pass
+#     --yes in the normal path. We invoke it through the known-good $SYMLINK; only the
+#     baked --command-path varies. To install WITHOUT approvals, the user re-runs
+#     `pesterm configure claude --no-approvals` (or answers "n" at the approvals prompt).
+#
+#     NOTE: NSHomeDirectory() resolves the real home via getpwuid() and IGNORES $HOME for
+#     a non-sandboxed binary, so configure targets the real ~/.claude/settings.json. For a
+#     SAFE install dry-run against a temp file, set PESTERM_SETTINGS (test-only; --yes there
+#     to stay non-interactive).
 echo
-echo "==> Install complete. Two one-time manual grants remain (pesterm cannot do these):"
+if [[ -n "${PESTERM_SETTINGS:-}" ]]; then
+    echo "==> Configuring pesterm (PESTERM_SETTINGS → $PESTERM_SETTINGS)"
+    "$SYMLINK" configure claude --yes --command-path "$CMD_PATH" --settings "$PESTERM_SETTINGS"
+else
+    "$SYMLINK" configure claude --command-path "$CMD_PATH"
+fi
+
 echo
-echo "  1. Set the notification alert style to Persistent:"
-echo "     Open System Settings -> Notifications -> pesterm -> Alert Style = Persistent."
-echo "     (a Temporary alert auto-dismisses and kills the click; Persistent stays so the reveal fires.)"
-echo
-echo "  2. Allow pesterm to control iTerm2 (one-time TCC prompt):"
-echo "     The first time you click a notification and it reveals, macOS shows"
-echo "     \"pesterm wants to control iTerm2\". Click OK."
-echo
-echo "  Then restart Claude Code so it reloads ~/.claude/settings.json."
-echo "  Verify any time with:  pesterm status"
+echo "==> Done. Restart Claude Code so it reloads ~/.claude/settings.json."
+echo "    Re-run setup any time with:  pesterm configure"
+echo "    Check state any time with:   pesterm status"

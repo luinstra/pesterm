@@ -34,33 +34,14 @@ final class WirePairTests: XCTestCase {
         return (entries.first as? [String: Any])?["matcher"] as? String
     }
 
-    // Mirror the CLI wire loop exactly: approvals ON => upsert BOTH events;
-    // --no-approvals => upsert the Notification hook AND REMOVE any existing
-    // PermissionRequest hook (so disabling truly disables, not just skips).
+    // Exercise the PRODUCTION transform (WiringPlan.build) — the same function
+    // ConfigureCommand calls — wrapped in the load/write the CLI does around it. No
+    // hand-rolled copy of the loop to drift.
     @discardableResult
     private func wire(_ p: String, command: String, approvals: Bool) throws -> [String: Any] {
-        let all = HookWriterRegistry.writers(for: "claude")
-        var proposed = try SettingsMerger.load(path: p)
-        for w in all {
-            if w is PermissionRequestHookWriter && !approvals {
-                proposed = try SettingsMerger.remove(proposed, event: w.hookEvent, isMine: w.isMine)
-            } else {
-                // Mirror the CLI: the Notification writer carries the no-permission
-                // matcher when approvals are also wired (permission_prompt handled by the
-                // PermissionRequest hook), else the full matcher.
-                let entry: [String: Any]
-                if w is ClaudeHookWriter {
-                    entry = ClaudeHookWriter(matcher: approvals
-                        ? ClaudeHookWriter.handledNotificationTypesNoPermission
-                        : ClaudeHookWriter.handledNotificationTypes)
-                        .makeEntry(command: command, sound: nil)
-                } else {
-                    entry = w.makeEntry(command: command)
-                }
-                proposed = try SettingsMerger.upsert(proposed, event: w.hookEvent,
-                                                     isMine: w.isMine, entry: entry)
-            }
-        }
+        let current = try SettingsMerger.load(path: p)
+        let proposed = try WiringPlan.build(agent: "claude", approvals: approvals,
+                                            command: command, sound: nil, current: current)
         try SettingsMerger.write(proposed, to: p)
         return try SettingsMerger.load(path: p)
     }

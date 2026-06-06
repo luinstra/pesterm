@@ -254,8 +254,9 @@ notification, which exits after reveal. Gated by `NotificationRequest.kind == .p
 
 ### Wiring
 
-`wire claude` registers BOTH the `Notification` and `PermissionRequest` hooks by default.
-The `HookWriterRegistry` returns a deduped LIST of writers per agent; `wire`/`unwire`/
+`configure claude` (the front door, replacing `wire`) registers BOTH the `Notification`
+and `PermissionRequest` hooks by default via the pure `WiringPlan.build`. The
+`HookWriterRegistry` returns a deduped LIST of writers per agent; `WiringPlan`/`unwire`/
 `status` iterate it (load-once / fold-each / write-once → single backup, preserved
 idempotency). `--no-approvals` wires ONLY the Notification hook. A LOUD one-time consent
 notice prints in the `wire` summary (and the install output) when approvals are wired.

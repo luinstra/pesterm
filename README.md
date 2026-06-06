@@ -28,8 +28,8 @@ notification **body** to reveal the terminal and read the full context WITHOUT d
 respond within 120 seconds — or on any error — pesterm falls back to Claude's terminal
 prompt and **never auto-allows**.
 
-Approvals are **on by default** (`pesterm wire claude`); disable with
-`pesterm wire claude --no-approvals`. The `PermissionRequest` hook is **interactive-only**
+Approvals are **on by default** (`pesterm configure claude`); disable with
+`pesterm configure claude --no-approvals` (or answer "n" at the approvals prompt). The `PermissionRequest` hook is **interactive-only**
 (it doesn't fire under headless `claude -p`), and pesterm does NOT mediate **subagent**
 tool calls — those still prompt in the terminal (#23983). See **[SETUP.md](./SETUP.md)**.
 
@@ -56,30 +56,32 @@ and:
 4. Verifies the bundle identity **through that entry** (asserts
    `Bundle.main.bundleIdentifier == com.luinstra.pesterm` and that the resolved
    bundle path is inside the installed `.app`). The install **fails loudly** if not.
-5. Self-wires the Claude Code notification hook into `~/.claude/settings.json`,
-   pinning the stable `$PREFIX/bin/pesterm` path.
-6. Prints the exact `export PATH=...` line if `$PREFIX/bin` is not on your `PATH`.
-7. Prints the two one-time manual GUI grants (see SETUP.md).
+5. Prints the exact `export PATH=...` line if `$PREFIX/bin` is not on your `PATH`.
+6. Hands off to **`pesterm configure`** — the guided setup that wires the Claude Code
+   hooks into `~/.claude/settings.json` (tool approvals on by default, stable
+   `$PREFIX/bin/pesterm` path), then reports **live grant state** and offers to open the
+   relevant System Settings panes for anything missing. It runs interactively at a
+   terminal and falls back to defaults when there's no TTY (`curl | bash` / CI). See
+   SETUP.md.
 
-The install is **idempotent** — safe to re-run. Re-running re-wires only if the hook
+The install is **idempotent** — safe to re-run. Re-running re-applies only if the hooks
 changed and never creates a redundant backup.
 
 ### Commands
 
 | Command | What it does |
 |---------|--------------|
-| `pesterm wire <agent>` | Idempotently merge pesterm's hooks into the agent's settings (Notification + tool-approval; `--no-approvals` for Notification only). |
+| `pesterm configure <agent>` | **The front door** (replaces `wire`). Guided setup: choose tool approvals + sound, wire both hooks, then report live grant state and offer to deep-link the System Settings panes. Non-interactive with `--yes` (applies defaults). |
 | `pesterm unwire <agent>` | Remove **only** pesterm's hook entries (both events); never touches unrelated hooks. |
 | `pesterm status` | Report bundle path, CLI entry + on-`PATH` state, per-agent wired state (listed once, with a per-event breakdown + a stale flag), running bundle identity, and the manual grants. |
 | `pesterm post --message ...` | Post a notification directly (used by the adapters internally). |
 | `pesterm sounds` | List the valid `--sound` names from the standard macOS Sounds dirs (system + your customs). |
-| `pesterm sample <name>` | Play a sound by name to audition it before wiring. |
+| `pesterm sample <name>` | Play a sound by name to audition it before configuring. |
 
-Supported agent today: `claude`. Useful flags: `--yes` (skip the confirm prompt),
-`--no-approvals` (wire only the Notification hook, omitting the tool-approval hook),
-`--settings <path>` (override the target settings file), `--command-path <path>`
-(pin the path written into the hook), `--sound <name>` (override the notification
-sound in the wired hook — see below; the tool-approval hook ignores `--sound`).
+Supported agent today: `claude`. Useful flags: `--yes` (non-interactive — apply
+defaults without prompting, the CI / `curl | bash` path), `--no-approvals` (disable the
+tool-approval hook), `--sound <name>` (override the notification sound; the tool-approval
+hook ignores `--sound`).
 
 ### Sounds
 
@@ -94,11 +96,11 @@ Each Claude event has a default sound:
 Override the sound for the wired hook with `--sound`:
 
 ```sh
-pesterm wire claude --sound Glass     # all events use Glass instead of the defaults
+pesterm configure claude --sound Glass     # all events use Glass instead of the defaults
 ```
 
 This bakes `--sound Glass` into the hook command
-(`… pesterm --adapter claude --sound Glass`). Want different sounds per event? Wire a
+(`… pesterm --adapter claude --sound Glass`). Want different sounds per event? Add a
 separate matcher entry per event by hand, each with its own `--sound` — no extra code
 needed.
 
@@ -116,8 +118,9 @@ Note: the newer macOS Tahoe alert sounds (Boop, etc.) are **not** name-addressab
 here — only the classic `/System/Library/Sounds` set and your own custom-dir sounds
 resolve by name.
 
-`wire`/`unwire`/`status` are **pure CLI** — they run and exit without spinning up
-AppKit, so `status` returns instantly.
+`configure`/`unwire`/`status` are **pure CLI** — they run and exit without spinning up
+the notification run loop, so `status` returns instantly. (`configure` reads grant state
+and may briefly play a sound sample, but never enters the keep-alive path.)
 
 ### PATH
 

@@ -116,7 +116,10 @@ pesterm_set_display_name() {
 
 # Build the release binary and echo its absolute path on stdout.
 pesterm_build_release() {
-    swift build -c release >&2
+    if ! swift build -c release >&2; then
+        echo "error: swift build -c release failed; not bundling a stale binary" >&2
+        return 1
+    fi
     local built
     built="$(swift build -c release --show-bin-path)/$BIN_NAME"
     if [[ ! -x "$built" ]]; then
@@ -178,8 +181,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     cd "$REPO_ROOT"
     APP_BUNDLE="$REPO_ROOT/pesterm.app"
 
+    # Guard the assignment so a failed build aborts here instead of bundling a stale
+    # binary — `set -e` does not propagate out of $(...) and inherit_errexit needs
+    # bash 4.4+ (macOS ships 3.2).
     echo "==> 1/4 swift build -c release"
-    BUILT_BIN="$(pesterm_build_release)"
+    if ! BUILT_BIN="$(pesterm_build_release)"; then
+        echo "error: build failed; not assembling a stale bundle." >&2
+        exit 1
+    fi
 
     echo "==> 2/4 assemble pesterm.app/Contents/{MacOS,Resources}"
     pesterm_assemble_bundle "$APP_BUNDLE" "$BUILT_BIN"
