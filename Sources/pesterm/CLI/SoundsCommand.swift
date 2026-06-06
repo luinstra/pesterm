@@ -31,7 +31,7 @@ struct SoundsCommand: ParsableCommand {
             }
         }
         print("")
-        print("Use any name above with --sound, e.g.  pesterm wire claude --sound \(entries[0].name)")
+        print("Use any name above with --sound, e.g.  pesterm configure claude --sound \(entries[0].name)")
         Foundation.exit(0)
     }
 }

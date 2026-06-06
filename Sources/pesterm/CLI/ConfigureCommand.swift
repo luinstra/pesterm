@@ -60,12 +60,17 @@ struct ConfigureCommand: ParsableCommand {
             print("")
             approvals = promptYesNo("Enable tool approvals (Approve/Deny Claude's tool calls from a notification)?",
                                     default: approvals)
-            if approvals { printConsentNotice(agent: agentKey) }
             if soundChoice == nil {
                 soundChoice = promptSound()
             }
             print("")
         }
+
+        // LOUD one-time consent notice whenever approvals are ON — in BOTH modes. The
+        // non-interactive paths (--yes / no TTY / curl|bash / CI) default approvals on and
+        // write a blocking PermissionRequest hook, so they must warn too (not only the
+        // interactive prompt branch).
+        if approvals { printConsentNotice(agent: agentKey) }
 
         // Resolve the command path baked into the hook. With --command-path, pin exactly
         // that (install.sh passes the stable bin entry). Otherwise default to the running
