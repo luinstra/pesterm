@@ -103,8 +103,8 @@ struct StatusCommand: ParsableCommand {
         // Manual-grant reminders.
         print("")
         print("Manual grants (one-time, pesterm cannot do these for you):")
-        print("  1. System Settings → Notifications → pesterm → style = Alerts")
-        print("     (Banners auto-dismiss and kill the click; Alerts persist.)")
+        print("  1. System Settings → Notifications → pesterm → Alert Style = Persistent")
+        print("     (a Temporary alert auto-dismisses and kills the click; Persistent stays.)")
         print("  2. First reveal triggers \"pesterm wants to control iTerm2\" → click OK.")
 
         Foundation.exit(0)

@@ -64,11 +64,15 @@ pesterm_build_icns_from_png() {
 # and set the display name in $1/Contents/Info.plist. MUST run BEFORE signing (R3):
 # mutating an ad-hoc-signed bundle breaks its signature.
 #
-# The agent to brand for is $2 (default "claude" — the single agent today):
+# The agent to brand for is $2 (default "claude" — the single agent today). It selects
+# the ICON only; the bundle display name is ALWAYS "pesterm" so macOS attributes
+# notifications, the Notifications pane, the Automation pane, and the TCC prompt to
+# "pesterm" (not "Claude Code"). The agent identity lives in the notification TITLE
+# (set per-adapter, e.g. "Claude Code"), which is where it belongs and where it varies.
 #   - claude  → build pesterm.icns from assets/claude-icon-1024.png (our committed
-#               Claude-ish mark). Display name "Claude Code".
+#               Claude-ish mark).
 #   - else    → build pesterm.icns from assets/pesterm-icon-1024.png (amber glyph).
-#               Display name "pesterm". Generic / unknown agents land here.
+#               Generic / unknown agents land here.
 # If the claude PNG is missing, fall back to the amber generic source.
 #
 # Echoes "claude" or "fallback" on stdout so callers can report which path ran.
@@ -81,7 +85,7 @@ pesterm_embed_icon() {
         if ! pesterm_build_icns_from_png "$app_bundle" "$CLAUDE_PNG"; then
             return 1
         fi
-        pesterm_set_display_name "$plist" "Claude Code"
+        pesterm_set_display_name "$plist" "pesterm"
         echo "claude"
         return 0
     fi

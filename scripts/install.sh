@@ -245,9 +245,9 @@ fi
 echo
 echo "==> Install complete. Two one-time manual grants remain (pesterm cannot do these):"
 echo
-echo "  1. Set the notification style to Alerts:"
-echo "     Open System Settings -> Notifications -> pesterm -> style = Alerts."
-echo "     (Banners auto-dismiss and kill the click; Alerts persist so the reveal fires.)"
+echo "  1. Set the notification alert style to Persistent:"
+echo "     Open System Settings -> Notifications -> pesterm -> Alert Style = Persistent."
+echo "     (a Temporary alert auto-dismisses and kills the click; Persistent stays so the reveal fires.)"
 echo
 echo "  2. Allow pesterm to control iTerm2 (one-time TCC prompt):"
 echo "     The first time you click a notification and it reveals, macOS shows"
