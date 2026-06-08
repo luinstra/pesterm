@@ -48,8 +48,9 @@
  *
  * The hierarchy is one-directional (a session has no back-pointer to its tab, a tab
  * none to its window), so we retain the enclosing loop variables and select
- * window -> tab -> session on a match. The first Apple Event sent here is what
- * triggers the Automation (TCC) prompt on first run — that is expected and correct.
+ * window -> tab -> session on a match. These Apple Events are self-automation (pesterm
+ * runs as an iTerm descendant), so macOS requires no Automation (TCC) grant in the normal
+ * case — and prompts on its own in any edge case that does.
  */
 BOOL pesterm_reveal_iterm_session(NSString *targetSessionId) {
     if (targetSessionId == nil) {

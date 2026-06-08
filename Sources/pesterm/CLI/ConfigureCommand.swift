@@ -195,29 +195,21 @@ struct ConfigureCommand: ParsableCommand {
             print("  sound: per-event defaults (Morse / Hero / Pop)")
         }
 
-        // Grant state (live-read from the pure-CLI path; never prompts).
+        // Grant state (live-read from the pure-CLI path; never prompts). Notifications
+        // is the only grant pesterm needs: the reveal drives iTerm from a process that's
+        // a descendant of iTerm itself (self-automation), so it needs no Automation grant.
+        // If some edge config ever does, macOS prompts at that moment on its own.
         print("")
         print("Grants:")
         let notif = GrantStatus.notificationStatus()
-        let automation = GrantStatus.automationStatus(bundleID: Self.iTermBundleID)
-        print("  notifications:        \(describe(notif))")
-        print("  iTerm2 automation:    \(describe(automation))")
+        print("  notifications: \(describe(notif))")
 
-        if interactive {
-            if notif != .granted,
+        if notif != .granted {
+            if interactive,
                promptYesNo("Open System Settings → Notifications to enable pesterm?", default: true) {
                 openPane(Self.notificationsPaneURL)
-            }
-            if automation != .granted,
-               promptYesNo("Open System Settings → Privacy → Automation for iTerm2?", default: true) {
-                openPane(Self.automationPaneURL)
-            }
-        } else {
-            if notif != .granted {
+            } else {
                 print("    → enable under System Settings → Notifications → pesterm")
-            }
-            if automation != .granted {
-                print("    → enable under System Settings → Privacy & Security → Automation")
             }
         }
     }
@@ -242,7 +234,5 @@ struct ConfigureCommand: ParsableCommand {
 
     // MARK: - Constants
 
-    static let iTermBundleID = "com.googlecode.iterm2"
     static let notificationsPaneURL = "x-apple.systempreferences:com.apple.preference.notifications"
-    static let automationPaneURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
 }

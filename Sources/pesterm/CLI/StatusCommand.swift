@@ -100,10 +100,10 @@ struct StatusCommand: ParsableCommand {
             }
         }
 
-        // Manual-grant reminders.
+        // Manual-grant reminder. Notifications is the only grant pesterm needs; macOS
+        // prompts for it on the first post. (The reveal needs no Automation grant.)
         print("")
-        print("Manual grants (one-time, pesterm cannot do these for you):")
-        print("  1. First reveal triggers \"pesterm wants to control iTerm2\" → click OK.")
+        print("Manual grant (one-time): allow notifications when macOS prompts on the first post.")
 
         Foundation.exit(0)
     }

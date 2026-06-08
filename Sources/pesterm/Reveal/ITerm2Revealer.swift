@@ -57,8 +57,10 @@ final class ITerm2Revealer: TerminalRevealer {
         // SBApplication(bundleIdentifier:) returns a private dynamic subclass, so a
         // Swift `as? iTermBridgeApplication` (a real runtime is-a check) FAILS even
         // though the object responds to every message. Objective-C never does an is-a
-        // check on the cast, so the traversal "just works" there. The first Apple Event
-        // sent inside is what triggers the Automation (TCC) prompt on first run.
+        // check on the cast, so the traversal "just works" there. These Apple Events would
+        // normally require an Automation (TCC) grant, but pesterm runs as a descendant of
+        // iTerm (spawned by the hook), so this is self-automation — macOS requires no grant
+        // or prompt in the normal case (and prompts on its own in any edge case that does).
         let found = pesterm_reveal_iterm_session(targetSessionId)
         if !found {
             // Fail closed: stale/closed session (or app unavailable). No user-facing

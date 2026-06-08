@@ -33,13 +33,12 @@ macOS grants, and links you to anything still needed. Re-running is safe (idempo
 If `~/.local/bin` isn't on your `PATH`, the installer prints the `export PATH=…` line to
 add to your shell profile.
 
-### One-time macOS grants
+### One-time macOS grant
 
-pesterm can't click these for you; `configure` walks you to each. Detail in
+**Allow notifications** for pesterm — macOS prompts the first time pesterm posts; click
+**Allow**. That's the only grant pesterm needs. (The jump-to-tab reveal drives iTerm from
+an iTerm-descendant process, so it needs no Automation grant.) Detail in
 **[SETUP.md](./SETUP.md)**.
-
-- **Allow notifications** for pesterm (first notification prompts).
-- **Allow pesterm to control iTerm2** (first reveal prompts) — required for jump-to-tab.
 
 ## Usage
 

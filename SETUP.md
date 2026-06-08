@@ -24,19 +24,18 @@ then verify with:
 pesterm status
 ```
 
-## One-time human setup (REQUIRED — pesterm cannot do these for you)
+## One-time human setup
 
-1. **Allow notifications.** The FIRST time pesterm posts, macOS shows a one-time
-   **"pesterm wants to send you notifications"** prompt (the UserNotifications
-   authorization grant). Click **Allow**. If you deny it, banners are suppressed until
-   you re-enable pesterm under **System Settings → Notifications → pesterm**.
+**Allow notifications.** The FIRST time pesterm posts, macOS shows a one-time
+**"pesterm wants to send you notifications"** prompt (the UserNotifications authorization
+grant). Click **Allow**. If you deny it, banners are suppressed until you re-enable pesterm
+under **System Settings → Notifications → pesterm**. This is the only grant pesterm needs.
 
-2. **Automation (TCC) grant for iTerm2.** The FIRST time pesterm drives iTerm2 via
-   ScriptingBridge (i.e. the first time you click a notification and it reveals), macOS
-   shows a one-time **"pesterm wants to control iTerm2"** prompt. Click **OK**. This
-   prompt only appears because the bundle carries `NSAppleEventsUsageDescription`. If
-   you deny it, reveal will be blocked until you re-enable pesterm under
-   **System Settings → Privacy & Security → Automation**.
+The jump-to-tab reveal drives iTerm via Apple Events but needs **no Automation grant**:
+pesterm runs as a descendant of iTerm (spawned by the hook), so the reveal is
+self-automation, which macOS allows without a grant. The bundle still carries
+`NSAppleEventsUsageDescription`, so in the rare config where a grant *is* needed, macOS
+prompts for it on its own at that moment — nothing to set up in advance.
 
 ## Claude Code hook wiring (done for you by `configure`)
 
