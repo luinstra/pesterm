@@ -14,6 +14,12 @@ import ArgumentParser
 ///    overridable by `--no-approvals` / `--sound`), print a text summary, open nothing.
 ///    This is the path `install.sh` and CI use.
 ///
+/// PRESERVE (don't stomp a reinstall): if pesterm is ALREADY wired for the agent and the
+/// user hasn't signaled a reconfigure (`--force`, or an explicit `--no-approvals` / `--sound`),
+/// configure skips the prompts AND the re-write — it just reports wired hooks + grant state.
+/// This protects hand-edits (per-event `--sound`/`--timeout`, a `--no-approvals` setup) that
+/// a fresh default rebuild would clobber. `--force` re-runs the full setup from scratch.
+///
 /// PURE-ish CLI: runs and exits via main.swift's fallthrough BEFORE NSApplication — it
 /// never posts a notification, so it must NOT spin the AppKit run loop. It uses only a
 /// bounded RunLoop for optional sound auditioning (like `sample`).
@@ -31,6 +37,9 @@ struct ConfigureCommand: ParsableCommand {
 
     @Flag(name: .long, help: "Disable the tool-approval (PermissionRequest) hook; wire only the Notification hook.")
     var noApprovals: Bool = false
+
+    @Flag(name: .long, help: "Re-run setup even if pesterm is already configured — overwrites existing hook wiring (incl. hand-edited per-event sounds/timeouts). Without it, an already-wired setup is left untouched.")
+    var force: Bool = false
 
     @Option(name: .long, help: "Notification sound override (e.g. Glass). Omit to keep per-event defaults. Run `pesterm sounds` for valid names.")
     var sound: String?
@@ -50,6 +59,30 @@ struct ConfigureCommand: ParsableCommand {
         }
 
         let interactive = !yes && isatty(STDIN_FILENO) != 0
+        let targetPath = settings ?? writers[0].settingsPath
+
+        // Load current settings UP FRONT so we can detect an existing setup BEFORE prompting.
+        let current: [String: Any]
+        do {
+            current = try SettingsMerger.load(path: targetPath)
+        } catch {
+            Wiring.fail("\(error)", code: 1)
+        }
+
+        // PRESERVE: don't stomp a reinstall / bare re-run of an already-wired (possibly
+        // hand-edited) setup. If pesterm is already wired and the user hasn't signaled a
+        // reconfigure (--force / --no-approvals / --sound), skip the prompts AND the
+        // re-write — just report what's wired + the grant state.
+        let alreadyWired = Self.isAgentWired(current, writers: writers)
+        if Self.shouldPreserveExisting(alreadyWired: alreadyWired, force: force,
+                                       noApprovals: noApprovals, soundProvided: sound != nil) {
+            print("pesterm is already configured for \(agentKey) → \(targetPath).")
+            print("Leaving your existing hooks untouched (per-event sounds/timeouts preserved).")
+            print("Re-run setup from scratch with:  pesterm configure \(agentKey) --force")
+            reportWiredHooks(agentKey: agentKey, targetPath: targetPath)
+            reportGrants(interactive: interactive)
+            Foundation.exit(0)
+        }
 
         // Resolve choices: flags are the defaults; interactive mode may override via prompts.
         var approvals = !noApprovals
@@ -81,16 +114,7 @@ struct ConfigureCommand: ParsableCommand {
             Wiring.warn("pesterm is not running from a .app bundle; notifications require the bundle identity. Install via scripts/install.sh for a working setup.")
         }
 
-        let targetPath = settings ?? writers[0].settingsPath
-
-        // Load → plan → write (idempotent: byte-identical proposal is a no-op).
-        let current: [String: Any]
-        do {
-            current = try SettingsMerger.load(path: targetPath)
-        } catch {
-            Wiring.fail("\(error)", code: 1)
-        }
-
+        // Plan → write (idempotent: byte-identical proposal is a no-op).
         let proposed: [String: Any]
         do {
             proposed = try WiringPlan.build(agent: agentKey, approvals: approvals,
@@ -179,6 +203,18 @@ struct ConfigureCommand: ParsableCommand {
     private func printSummary(agentKey: String, targetPath: String,
                              approvals: Bool, soundChoice: String?,
                              command: String, interactive: Bool) {
+        reportWiredHooks(agentKey: agentKey, targetPath: targetPath)
+        if let soundChoice = soundChoice {
+            print("  sound: \(soundChoice) (all events)")
+        } else {
+            print("  sound: per-event defaults (Morse / Hero / Pop)")
+        }
+        reportGrants(interactive: interactive)
+    }
+
+    /// Report which of the agent's hooks are currently wired (reads the live settings).
+    /// Reused by the configure summary AND the preserve path.
+    private func reportWiredHooks(agentKey: String, targetPath: String) {
         print("")
         print("Wired hooks:")
         let writers = HookWriterRegistry.writers(for: agentKey)
@@ -189,16 +225,12 @@ struct ConfigureCommand: ParsableCommand {
                 print("  \(writer.hookEvent): \(wired ? "wired" : "not wired")")
             }
         }
-        if let soundChoice = soundChoice {
-            print("  sound: \(soundChoice) (all events)")
-        } else {
-            print("  sound: per-event defaults (Morse / Hero / Pop)")
-        }
+    }
 
-        // Grant state (live-read from the pure-CLI path; never prompts). Notifications
-        // is the only grant pesterm needs: the reveal drives iTerm from a process that's
-        // a descendant of iTerm itself (self-automation), so it needs no Automation grant.
-        // If some edge config ever does, macOS prompts at that moment on its own.
+    /// Report (and, when interactive, offer to fix) the notifications grant — the only grant
+    /// pesterm needs (the reveal is self-automation from an iTerm-descendant process). Live-
+    /// read from the pure-CLI path; never prompts for the grant itself.
+    private func reportGrants(interactive: Bool) {
         print("")
         print("Grants:")
         let notif = GrantStatus.notificationStatus()
@@ -212,6 +244,28 @@ struct ConfigureCommand: ParsableCommand {
                 print("    → enable under System Settings → Notifications → pesterm")
             }
         }
+    }
+
+    // MARK: - Existing-setup detection (PURE, testable)
+
+    /// PURE: is any of `writers`' hook events already populated with a pesterm-owned entry?
+    /// "Already wired" = at least one pesterm hook present (a no-approvals setup still has
+    /// the Notification hook), so a reinstall preserves it rather than rebuilding defaults.
+    static func isAgentWired(_ settings: [String: Any], writers: [HookWriter]) -> Bool {
+        let hooks = settings["hooks"] as? [String: Any]
+        for writer in writers {
+            let entries = (hooks?[writer.hookEvent] as? [Any]) ?? []
+            if entries.contains(where: { writer.isMine($0) }) { return true }
+        }
+        return false
+    }
+
+    /// PURE: should configure PRESERVE the existing wiring (skip prompts + skip re-write)?
+    /// Only when pesterm is already wired AND the user gave no reconfigure signal: no
+    /// `--force`, no explicit `--no-approvals`, no explicit `--sound`.
+    static func shouldPreserveExisting(alreadyWired: Bool, force: Bool,
+                                       noApprovals: Bool, soundProvided: Bool) -> Bool {
+        return alreadyWired && !force && !noApprovals && !soundProvided
     }
 
     private func describe(_ state: GrantState) -> String {

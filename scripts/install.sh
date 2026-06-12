@@ -250,5 +250,6 @@ fi
 
 echo
 echo "==> Done. Restart Claude Code so it reloads ~/.claude/settings.json."
-echo "    Re-run setup any time with:  pesterm configure"
+echo "    Re-run setup any time with:  pesterm configure   (already configured? it leaves"
+echo "    your setup untouched — add --force to overwrite it)."
 echo "    Check state any time with:   pesterm status"

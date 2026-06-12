@@ -52,7 +52,13 @@ pesterm configure                 # guided: tool approvals, sound, grant check
 pesterm configure --yes           # non-interactive: apply defaults (CI / curl | bash)
 pesterm configure --no-approvals  # notifications only, no tool approvals
 pesterm configure --sound Glass   # use Glass instead of the per-event default sounds
+pesterm configure --force         # re-run setup even if already configured (overwrites it)
 ```
+
+**Reinstall-safe.** If pesterm is already configured, `configure` (and the installer) leave
+your existing hooks **untouched** — no prompts, no overwrite — so hand-edits like per-event
+sounds/timeouts survive a reinstall. It just reports what's wired and checks grants. Pass
+`--force` (or an explicit `--sound` / `--no-approvals`) to deliberately re-run setup.
 
 ### Notifications
 
