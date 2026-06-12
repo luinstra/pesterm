@@ -16,4 +16,15 @@ enum RevealerRegistry {
         }
         return nil
     }
+
+    /// Reconstruct the revealer described by a notification's `revealUserInfo` dict (the
+    /// reveal-target handoff), or nil if no registered terminal recognizes it.
+    static func revealer(from userInfo: [String: String]) -> TerminalRevealer? {
+        for type in revealers {
+            if let revealer = type.reveal(from: userInfo) {
+                return revealer
+            }
+        }
+        return nil
+    }
 }

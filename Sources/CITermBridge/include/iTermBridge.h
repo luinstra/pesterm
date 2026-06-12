@@ -168,9 +168,11 @@ typedef enum iTermBridgeSaveOptions iTermBridgeSaveOptions;
  * though Objective-C message dispatch works fine. Doing the whole traversal in ObjC
  * (which never does an is-a check) sidesteps the issue entirely.
  *
- * Returns YES if a session whose `id` equals targetSessionId was found and
- * window/tab/session were selected; NO if no match (or app unavailable). The caller
- * still treats iTerm as fronted regardless (front is done separately in AppKit).
+ * `bundleId` is the terminal's bundle identifier (the single source of truth lives in
+ * the Swift revealer; it is passed in rather than hardcoded here so the constant is not
+ * duplicated). Returns YES if a session whose `id` equals targetSessionId was found and
+ * window/tab/session were selected; NO if no match (or app/bundleId unavailable). The
+ * caller still treats iTerm as fronted regardless (front is done separately in AppKit).
  */
-BOOL pesterm_reveal_iterm_session(NSString *targetSessionId);
+BOOL pesterm_reveal_iterm_session(NSString *targetSessionId, NSString *bundleId);
 

@@ -18,3 +18,21 @@ enum AgentSource: String, CaseIterable, ExpressibleByArgument {
         self = value
     }
 }
+
+extension AgentSource {
+    /// The notification coalescing-group prefix for this source + notification kind. Keeps
+    /// the agent-name vocabulary in ONE place: a 2nd agent adds a case here rather than
+    /// scattering parallel string literals across the adapters (e.g. "codex-" / "codex-perm-").
+    /// `.info` and `.permission` get distinct prefixes so the two streams never coalesce.
+    func groupPrefix(for kind: NotificationKind) -> String {
+        let base: String
+        switch self {
+        case .claude: base = "claude"
+        case .generic: base = "pesterm"
+        }
+        switch kind {
+        case .info: return "\(base)-"
+        case .permission: return "\(base)-perm-"
+        }
+    }
+}

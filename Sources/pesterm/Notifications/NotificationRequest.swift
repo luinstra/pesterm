@@ -24,6 +24,15 @@ struct NotificationRequest {
     /// Info vs. permission. Defaults to `.info` so every existing call site (the
     /// `post` subcommand, `ClaudeAdapter`) is unchanged.
     var kind: NotificationKind
+    /// Serialized reveal target (from the detected `TerminalRevealer`), embedded in the
+    /// notification's `userInfo` so a click delivered to ANY pesterm process reveals the
+    /// CLICKED notification's tab. Set by main.swift after detection; nil when there is no
+    /// revealer (e.g. a bare `post` outside a known terminal).
+    var revealUserInfo: [String: String]?
+    /// Optional per-notification lifetime override (from `--timeout <seconds>`). When set,
+    /// it replaces the default cap: the info hard-cap, or the permission fail-safe wait
+    /// (clamped — see the backend / `PermissionFlow.effectiveTimeout`). nil → the defaults.
+    var lifetimeSeconds: TimeInterval?
 
     init(
         title: String,
@@ -32,7 +41,9 @@ struct NotificationRequest {
         sound: String? = nil,
         source: AgentSource = .default,
         groupID: String? = nil,
-        kind: NotificationKind = .info
+        kind: NotificationKind = .info,
+        revealUserInfo: [String: String]? = nil,
+        lifetimeSeconds: TimeInterval? = nil
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -41,5 +52,7 @@ struct NotificationRequest {
         self.source = source
         self.groupID = groupID
         self.kind = kind
+        self.revealUserInfo = revealUserInfo
+        self.lifetimeSeconds = lifetimeSeconds
     }
 }

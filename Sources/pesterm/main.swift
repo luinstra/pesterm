@@ -20,10 +20,12 @@ private func buildRequestAndRevealer() -> (NotificationRequest, TerminalRevealer
     let args = Array(CommandLine.arguments.dropFirst())
     if let adapterValue = adapterArgument(in: args) {
         // Optional `--sound <name>` (or `--sound=<name>`) OVERRIDES the event's default
-        // sound for whatever events this hook entry handles.
+        // sound for whatever events this hook entry handles. Optional `--timeout <seconds>`
+        // OVERRIDES this notification's lifetime (info hard-cap / permission fail-safe wait).
         let soundOverride = soundArgument(in: args)
+        let timeoutOverride = timeoutArgument(in: args)
         return buildFromAdapter(adapterValue, soundOverride: soundOverride,
-                                revealer: revealer)
+                                timeoutOverride: timeoutOverride, revealer: revealer)
     }
 
     // Standard parse: `post` subcommand builds the request. `--help` / errors are
@@ -105,19 +107,41 @@ private func soundArgument(in args: [String]) -> String? {
     return nil
 }
 
-/// Adapter mode: read ALL of stdin (readDataToEndOfFile — returns at EOF incl. empty;
-/// V4), map to a request, or exit 0 on suppress/unknown (C3).
+/// Extract the value of `--timeout` from raw args, supporting `--timeout <seconds>` and
+/// `--timeout=<seconds>`. Returns nil if absent, empty, or non-positive (defaults stand) —
+/// a stray/garbage flag never overrides the safe default. The backend clamps the value.
+private func timeoutArgument(in args: [String]) -> TimeInterval? {
+    func parse(_ s: String) -> TimeInterval? {
+        guard let v = TimeInterval(s), v > 0 else { return nil }
+        return v
+    }
+    var i = 0
+    while i < args.count {
+        let arg = args[i]
+        if arg == "--timeout" {
+            return i + 1 < args.count ? parse(args[i + 1]) : nil
+        }
+        if arg.hasPrefix("--timeout=") {
+            return parse(String(arg.dropFirst("--timeout=".count)))
+        }
+        i += 1
+    }
+    return nil
+}
+
+/// Adapter mode: look up the agent adapter for `--adapter <value>`, read ALL of stdin
+/// (readDataToEndOfFile — returns at EOF incl. empty; V4), and map it to an outcome.
+/// An UNKNOWN adapter exits 2; a suppression logs its diagnostic + exits 0 (C3); a post
+/// returns the request so the keep-alive/AppDelegate/backend machinery runs (heeding the
+/// GUARD NOTE above — the permission path needs `app.run()` to deliver and wait).
+///
+/// Dispatch goes through `AdapterRegistry`, so adding an agent is a new `AgentAdapter`
+/// conformance + one registry line — this function never names a concrete adapter.
 private func buildFromAdapter(_ adapter: String, soundOverride: String?,
+                              timeoutOverride: TimeInterval?,
                               revealer: TerminalRevealer?)
     -> (NotificationRequest, TerminalRevealer?) {
-    // Two-way branch: the existing `claude` Notification adapter, or the new
-    // `claude-permission` blocking PermissionRequest adapter. Anything else exits 2.
-    switch AdapterDispatch.route(for: adapter) {
-    case .info:
-        break // fall through to the existing claude path below.
-    case .permission:
-        return buildPermissionRequest(revealer: revealer)
-    case .unknown:
+    guard let adapterType = AdapterRegistry.adapter(for: adapter) else {
         FileHandle.standardError.write(
             Data("pesterm: unknown adapter '\(adapter)'\n".utf8))
         exit(2)
@@ -126,66 +150,18 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
     // Read stdin BEFORE NSApp.run() (PP1). readDataToEndOfFile returns at EOF.
     let data = FileHandle.standardInput.readDataToEndOfFile()
 
-    guard let payload = ClaudeAdapter.parse(data) else {
-        FileHandle.standardError.write(
-            Data("pesterm: empty or invalid Claude hook JSON; nothing posted\n".utf8))
-        exit(0)
-    }
-
-    // iTerm2 session id from the env (NOT payload). Used only for the coalescing group.
+    // iTerm2 session id from the env (NOT payload). Used only for reveal/coalescing.
     let iTermSessionId = iTermSessionIdFromEnv()
 
-    guard let request = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: iTermSessionId,
-                                                   soundOverride: soundOverride) else {
-        // Suppressed (auth_success) or unknown/missing type. Log + exit 0 (C3).
-        let type = payload.notificationType ?? "<missing>"
-        if type == "auth_success" {
-            FileHandle.standardError.write(
-                Data("pesterm: auth_success suppressed for parity\n".utf8))
-        } else {
-            FileHandle.standardError.write(
-                Data("pesterm: unknown notification_type '\(type)' suppressed\n".utf8))
-        }
+    switch adapterType.outcome(stdin: data, iTermSessionId: iTermSessionId,
+                               soundOverride: soundOverride) {
+    case .post(var request):
+        request.lifetimeSeconds = timeoutOverride
+        return (request, revealer)
+    case .suppress(let message):
+        FileHandle.standardError.write(Data((message + "\n").utf8))
         exit(0)
     }
-
-    return (request, revealer)
-}
-
-/// Permission adapter mode: read stdin, parse the PermissionRequest hook JSON, and build
-/// the `.permission` request that reaches `app.run()` (heeding the main.swift GUARD NOTE
-/// — it returns a request so the keep-alive/AppDelegate/backend machinery runs). On
-/// empty/invalid JSON, emit NOTHING + exit 0 so Claude falls back to its terminal prompt.
-private func buildPermissionRequest(revealer: TerminalRevealer?)
-    -> (NotificationRequest, TerminalRevealer?) {
-    // Read stdin BEFORE NSApp.run() (PP1). readDataToEndOfFile returns at EOF.
-    let data = FileHandle.standardInput.readDataToEndOfFile()
-
-    guard let payload = ClaudePermissionAdapter.parse(data) else {
-        FileHandle.standardError.write(
-            Data("pesterm: empty or invalid Claude PermissionRequest JSON; nothing posted\n".utf8))
-        exit(0)
-    }
-
-    // Interactive/meta tools (AskUserQuestion, ExitPlanMode) are not mediated — emit
-    // nothing + exit 0 so Claude handles them with its native terminal UI. NEVER
-    // auto-allow; this is a terminal fallback, not an approval.
-    guard ClaudePermissionAdapter.shouldMediate(payload.toolName) else {
-        FileHandle.standardError.write(
-            Data("pesterm: tool '\(payload.toolName ?? "?")' is not mediated; terminal fallback\n".utf8))
-        exit(0)
-    }
-
-    let iTermSessionId = iTermSessionIdFromEnv()
-
-    guard let request = ClaudePermissionAdapter.buildRequest(from: payload,
-                                                             iTermSessionId: iTermSessionId) else {
-        FileHandle.standardError.write(
-            Data("pesterm: nothing approvable in PermissionRequest; nothing posted\n".utf8))
-        exit(0)
-    }
-
-    return (request, revealer)
 }
 
 /// The iTerm2 session GUID from the inherited env (last colon-component, PP2), or nil.
@@ -196,7 +172,12 @@ private func iTermSessionIdFromEnv() -> String? {
 
 // MARK: - Entry point
 
-let (request, revealer) = buildRequestAndRevealer()
+let (builtRequest, revealer) = buildRequestAndRevealer()
+var request = builtRequest
+// Embed the reveal target in the request so it rides in the notification's userInfo: a
+// click delivered to ANY pesterm process then reveals THIS notification's tab, not the
+// receiver's own (W4 — same misrouting root cause as the permission decision handoff).
+request.revealUserInfo = revealer?.revealUserInfo
 
 // Diagnostic dry-run: when PESTERM_PRINT_REQUEST is set, print the BUILT request
 // (title/subtitle/body/sound/group) and exit 0 WITHOUT posting or spinning AppKit.

@@ -60,19 +60,50 @@ final class PermissionFlowTests: XCTestCase {
         XCTAssertFalse(gate.tryResolve())
     }
 
-    // MARK: AdapterDispatch routing
+    // NOTE: adapter routing moved from AdapterDispatch to AdapterRegistry — see
+    // AdapterRegistryTests.
 
-    func testRouteClaudeIsInfo() {
-        XCTAssertEqual(AdapterDispatch.route(for: "claude"), .info)
+    // MARK: tap routing (multi-process handoff)
+
+    func testRouteOwnApproveResolvesOwn() {
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "me", myId: "me",
+                                 actionId: PermissionFlow.approveActionIdentifier),
+            .resolveOwn(.allow))
     }
 
-    func testRouteClaudePermissionIsPermission() {
-        XCTAssertEqual(AdapterDispatch.route(for: "claude-permission"), .permission)
+    func testRouteOwnDenyResolvesOwn() {
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "me", myId: "me",
+                                 actionId: PermissionFlow.denyActionIdentifier),
+            .resolveOwn(.deny))
     }
 
-    func testRouteUnknown() {
-        XCTAssertEqual(AdapterDispatch.route(for: "codex"), .unknown)
-        XCTAssertEqual(AdapterDispatch.route(for: ""), .unknown)
-        XCTAssertEqual(AdapterDispatch.route(for: "claude-x"), .unknown)
+    func testRouteForeignDecisionRecordsForOther() {
+        // A decision tap for ANOTHER process's notification → hand it off by that id.
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "other", myId: "me",
+                                 actionId: PermissionFlow.approveActionIdentifier),
+            .recordForOther(id: "other", .allow))
+    }
+
+    func testRouteOwnBodyClickReveals() {
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "me", myId: "me", actionId: "body-or-default"),
+            .revealOwn)
+    }
+
+    func testRouteForeignBodyClickIgnored() {
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "other", myId: "me", actionId: "body-or-default"),
+            .ignoreForeignBodyClick)
+    }
+
+    func testRouteBeforeOwnIdSetTreatsDecisionAsForeign() {
+        // myId is nil until post() assigns it; a decision tap then can't be "ours".
+        XCTAssertEqual(
+            PermissionFlow.route(responseId: "x", myId: nil,
+                                 actionId: PermissionFlow.approveActionIdentifier),
+            .recordForOther(id: "x", .allow))
     }
 }

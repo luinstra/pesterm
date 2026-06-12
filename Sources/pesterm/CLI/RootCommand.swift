@@ -12,6 +12,6 @@ struct RootCommand: ParsableCommand {
                       SoundsCommand.self, SampleCommand.self]
     )
 
-    @Option(name: .long, help: "Read an agent's hook JSON on stdin. Supported: claude.")
+    @Option(name: .long, help: "Read an agent's hook JSON on stdin. Supported: claude (notifications), claude-permission (approvals).")
     var adapter: String?
 }

@@ -26,6 +26,13 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/pesterm",
+            // CLAUDE.md guidance files live beside the code they document; they are docs,
+            // not build inputs, so exclude them or SwiftPM flags them as stray resources.
+            exclude: [
+                "Adapters/CLAUDE.md",
+                "Permission/CLAUDE.md",
+                "Wiring/CLAUDE.md",
+            ],
             // The generated header references ScriptingBridge types, so the consuming
             // target must link the framework explicitly. AppKit/Foundation for
             // activation + Foundation APIs.

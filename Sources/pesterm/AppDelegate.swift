@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            try backend.post(request) { [request, revealer] actionIdentifier in
+            try backend.post(request) { [request, revealer] actionIdentifier, revealUserInfo in
                 // Click handler. For BOTH kinds, a body/default (or unknown) click
                 // reveals the terminal:
                 //  - INFO: the backend reveals then exits (unchanged).
@@ -34,9 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                    PermissionFlow.decision(forActionIdentifier: actionIdentifier) != nil {
                     return
                 }
-                guard let revealer = revealer else { return }
+                // Reveal the CLICKED notification's target (carried in its userInfo) so a
+                // click the OS delivered to the wrong process still reveals the RIGHT tab.
+                // Fall back to this process's env-detected revealer when no target rode along.
+                let target = revealUserInfo.flatMap { RevealerRegistry.revealer(from: $0) } ?? revealer
+                guard let target = target else { return }
+                Trace.log("REVEAL target=\(revealUserInfo?["session"] ?? "nil") source=\(revealUserInfo != nil ? "userInfo" : "fallback")")
                 do {
-                    try revealer.reveal()
+                    try target.reveal()
                 } catch {
                     FileHandle.standardError.write(
                         Data("pesterm: reveal failed: \(error)\n".utf8))

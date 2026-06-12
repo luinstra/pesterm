@@ -19,6 +19,12 @@ enum GrantState: String {
 /// belt-and-suspenders escape hatch (returns `.unknown` rather than hanging) if that ever
 /// changes on a future OS.
 ///
+/// FRAGILITY (known bet, not a guarantee): the no-deadlock property is a load-bearing
+/// OS-behavior ASSUMPTION. If a future macOS routes the callback to the main queue, the
+/// timeout — not a hang — is what saves us, at the cost of silently under-reporting the
+/// grant as `.unknown`. If `status`/`configure` ever start reporting `.unknown` spuriously,
+/// this is the first place to look.
+///
 /// (pesterm needs no Automation/TCC grant for the reveal: it drives iTerm from an
 /// iTerm-descendant process — self-automation — so macOS requires no grant, and prompts
 /// on its own in the rare case one is ever needed.)

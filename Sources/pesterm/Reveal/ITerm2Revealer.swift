@@ -9,6 +9,10 @@ final class ITerm2Revealer: TerminalRevealer {
     /// iTerm2 bundle id (SBApplication + NSRunningApplication) — Constants table.
     static let iTermBundleID = "com.googlecode.iterm2"
 
+    /// Terminal tag in the reveal-target userInfo handoff (distinguishes terminals when
+    /// reconstructing a revealer from a notification click).
+    static let terminalTag = "iterm2"
+
     /// The iTerm2 session GUID to match — the LAST colon-component of ITERM_SESSION_ID
     /// (PP2), captured at detect time from the inherited terminal env.
     let targetSessionId: String
@@ -17,6 +21,20 @@ final class ITerm2Revealer: TerminalRevealer {
 
     init(targetSessionId: String) {
         self.targetSessionId = targetSessionId
+    }
+
+    // MARK: - Reveal-target handoff (rides in the notification userInfo)
+
+    /// The target serialized for the userInfo handoff: terminal tag + session GUID.
+    var revealUserInfo: [String: String] {
+        ["terminal": Self.terminalTag, "session": targetSessionId]
+    }
+
+    /// Reconstruct from a userInfo dict, or nil if it isn't ours (tag mismatch / no session).
+    static func reveal(from userInfo: [String: String]) -> TerminalRevealer? {
+        guard userInfo["terminal"] == terminalTag,
+              let session = userInfo["session"], !session.isEmpty else { return nil }
+        return ITerm2Revealer(targetSessionId: session)
     }
 
     // MARK: - Detection
@@ -61,7 +79,7 @@ final class ITerm2Revealer: TerminalRevealer {
         // normally require an Automation (TCC) grant, but pesterm runs as a descendant of
         // iTerm (spawned by the hook), so this is self-automation — macOS requires no grant
         // or prompt in the normal case (and prompts on its own in any edge case that does).
-        let found = pesterm_reveal_iterm_session(targetSessionId)
+        let found = pesterm_reveal_iterm_session(targetSessionId, Self.iTermBundleID)
         if !found {
             // Fail closed: stale/closed session (or app unavailable). No user-facing
             // error path beyond stderr; iTerm2 was still fronted in step 1.

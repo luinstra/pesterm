@@ -9,7 +9,7 @@ import Foundation
 ///
 /// DENY IS JSON `behavior:"deny"` WITH EXIT 0 — there is NO exit-2 path, NO
 /// `updatedInput`, NO `always`. Every outcome exits 0.
-enum PermissionDecision {
+enum PermissionDecision: Equatable {
     case allow
     case deny
     case timeout

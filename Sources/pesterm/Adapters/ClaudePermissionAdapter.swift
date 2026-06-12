@@ -71,10 +71,11 @@ enum ClaudePermissionAdapter {
         }
     }
 
-    /// Group prefix. DISTINCT from `ClaudeAdapter.groupPrefix` ("claude-") so the info
-    /// and permission notification streams never coalesce — the UN backend uses the
-    /// groupID directly as the request identifier.
-    static let groupPrefix = "claude-perm-"
+    /// Group prefix ("claude-perm-"). DISTINCT from `ClaudeAdapter.groupPrefix` so the info
+    /// and permission notification streams never coalesce (the UN backend uses the groupID
+    /// directly as the request identifier). Derived from `AgentSource` so the agent-name
+    /// vocabulary lives in one place.
+    static let groupPrefix = AgentSource.claude.groupPrefix(for: .permission)
 
     /// Tool names pesterm does NOT mediate with an Approve/Deny notification. These are
     /// INTERACTIVE / meta tools whose own in-terminal UI IS the point — mediating them is
@@ -159,12 +160,32 @@ enum ClaudePermissionAdapter {
         return nil
     }
 
+    /// Case-insensitive markers for keys whose VALUE must never be rendered into a banner
+    /// (a notification is shoulder-surfable AND lands in Notification Center). Matched as
+    /// substrings, so e.g. `aws_secret_access_key` / `access_token` / `client_secret` hit.
+    /// Only the `compactSummary` fallback is at risk: `primaryTarget`'s key lists are all
+    /// non-sensitive, and a Bash command is shown verbatim by design (you must see what you
+    /// approve). The key NAME still renders so the user knows a sensitive field is present —
+    /// only the value is redacted.
+    private static let sensitiveKeyMarkers = [
+        "token", "secret", "password", "passwd", "credential",
+        "api_key", "apikey", "bearer", "private_key", "access_key",
+    ]
+
+    /// PURE: does this key name look like it carries a secret?
+    static func isSensitiveKey(_ key: String) -> Bool {
+        let lower = key.lowercased()
+        return sensitiveKeyMarkers.contains { lower.contains($0) }
+    }
+
     /// PURE: a deterministic compact `key=value` summary of scalar fields (sorted keys),
-    /// used when no preferred target key is present. Truthful — shows the real values.
+    /// used when no preferred target key is present. Truthful — shows the real values,
+    /// except secret-looking keys whose value is redacted (the key name still shows).
     private static func compactSummary(_ fields: [String: JSONValue]) -> String {
         let parts = fields.keys.sorted().compactMap { key -> String? in
             guard let v = fields[key]?.scalarString, !v.isEmpty else { return nil }
-            return "\(key)=\(v)"
+            let value = isSensitiveKey(key) ? "<redacted>" : v
+            return "\(key)=\(value)"
         }
         return parts.joined(separator: " ")
     }
@@ -177,11 +198,15 @@ enum ClaudePermissionAdapter {
         return String(id.prefix(6))
     }
 
-    /// PURE: the banner title — includes the tool name AND short session id so the
-    /// generic "Claude Code" string can't hide which call/session this is.
+    /// PURE: the banner title — names the tool AND, when present, the short session id so
+    /// overlapping prompts for the same tool from different sessions stay distinguishable.
+    /// The subtitle also carries the session id; the title is the glanceable line.
     static func bannerTitle(toolName: String?, sessionId: String?) -> String {
         let tool = (toolName?.isEmpty == false) ? toolName! : "tool"
-        return "Claude wants to run \(tool)"
+        guard let id = sessionId, !id.isEmpty else {
+            return "Claude wants to run \(tool)"
+        }
+        return "Claude wants to run \(tool) · \(shortSessionId(id))"
     }
 
     /// PURE: the banner subtitle — project (basename of cwd) + short session id.
@@ -219,5 +244,29 @@ enum ClaudePermissionAdapter {
             groupID: group,
             kind: .permission
         )
+    }
+}
+
+// MARK: - AgentAdapter
+
+extension ClaudePermissionAdapter: AgentAdapter {
+    static var adapterValue: String { "claude-permission" }
+    static var kind: NotificationKind { .permission }
+
+    /// PURE: parse the PermissionRequest hook JSON and map it to a post or a suppression.
+    /// Interactive/meta tools (the `unmediatedTools` denylist) suppress to a terminal
+    /// fallback — NEVER an auto-allow. `soundOverride` is ignored on the permission path.
+    static func outcome(stdin: Data, iTermSessionId: String?,
+                        soundOverride: String?) -> AdapterOutcome {
+        guard let payload = parse(stdin) else {
+            return .suppress("pesterm: empty or invalid Claude PermissionRequest JSON; nothing posted")
+        }
+        guard shouldMediate(payload.toolName) else {
+            return .suppress("pesterm: tool '\(payload.toolName ?? "?")' is not mediated; terminal fallback")
+        }
+        guard let request = buildRequest(from: payload, iTermSessionId: iTermSessionId) else {
+            return .suppress("pesterm: nothing approvable in PermissionRequest; nothing posted")
+        }
+        return .post(request)
     }
 }

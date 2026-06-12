@@ -26,8 +26,10 @@ enum ClaudeAdapter {
     /// Hardcoded title, matching the prototype.
     static let title = "Claude Code"
 
-    /// Group prefix (Constants table): "claude-" + iTerm2 session id.
-    static let groupPrefix = "claude-"
+    /// Group prefix ("claude-" + iTerm2 session id). Derived from `AgentSource` so the
+    /// agent-name vocabulary lives in ONE place (a 2nd agent adds a case there, not a
+    /// parallel literal here).
+    static let groupPrefix = AgentSource.claude.groupPrefix(for: .info)
 
     /// PURE: decode the hook JSON. Returns nil for empty/invalid input (caller
     /// suppresses). Unit-testable without posting.
@@ -92,5 +94,31 @@ enum ClaudeAdapter {
             path = FileManager.default.currentDirectoryPath
         }
         return (path as NSString).lastPathComponent
+    }
+}
+
+// MARK: - AgentAdapter
+
+extension ClaudeAdapter: AgentAdapter {
+    static var adapterValue: String { "claude" }
+    static var kind: NotificationKind { .info }
+
+    /// PURE: parse the Notification hook JSON and map it to a post or a suppression — the
+    /// info branch the old main.swift `buildFromAdapter` ran inline, now behind the protocol.
+    static func outcome(stdin: Data, iTermSessionId: String?,
+                        soundOverride: String?) -> AdapterOutcome {
+        guard let payload = parse(stdin) else {
+            return .suppress("pesterm: empty or invalid Claude hook JSON; nothing posted")
+        }
+        guard let request = buildRequest(from: payload, iTermSessionId: iTermSessionId,
+                                         soundOverride: soundOverride) else {
+            // Suppressed (auth_success) or unknown/missing type (C3).
+            let type = payload.notificationType ?? "<missing>"
+            if type == "auth_success" {
+                return .suppress("pesterm: auth_success suppressed for parity")
+            }
+            return .suppress("pesterm: unknown notification_type '\(type)' suppressed")
+        }
+        return .post(request)
     }
 }

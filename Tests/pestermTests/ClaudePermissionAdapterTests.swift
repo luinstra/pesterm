@@ -90,6 +90,30 @@ final class ClaudePermissionAdapterTests: XCTestCase {
         XCTAssertEqual(text, "Bash")
     }
 
+    // MARK: sensitive-value redaction (compact-summary fallback only)
+
+    func testIsSensitiveKey() {
+        XCTAssertTrue(ClaudePermissionAdapter.isSensitiveKey("token"))
+        XCTAssertTrue(ClaudePermissionAdapter.isSensitiveKey("access_token"))
+        XCTAssertTrue(ClaudePermissionAdapter.isSensitiveKey("AWS_SECRET_ACCESS_KEY"))
+        XCTAssertTrue(ClaudePermissionAdapter.isSensitiveKey("client_secret"))
+        XCTAssertTrue(ClaudePermissionAdapter.isSensitiveKey("password"))
+        XCTAssertFalse(ClaudePermissionAdapter.isSensitiveKey("file_path"))
+        XCTAssertFalse(ClaudePermissionAdapter.isSensitiveKey("url"))
+        XCTAssertFalse(ClaudePermissionAdapter.isSensitiveKey("mode"))
+    }
+
+    func testCompactSummaryRedactsSensitiveValues() {
+        // Unknown tool with no preferred target key → compact summary fallback. A secret
+        // field's VALUE must never reach the banner; the key name and other fields still do.
+        let json = #"{"tool_name":"CustomTool","tool_input":{"api_key":"sk-live-123","mode":"w"}}"#
+        let p = ClaudePermissionAdapter.parse(Data(json.utf8))!
+        let text = ClaudePermissionAdapter.approvableText(from: p)
+        XCTAssertFalse(text.contains("sk-live-123"), "secret value must not reach the banner")
+        XCTAssertTrue(text.contains("api_key=<redacted>"))
+        XCTAssertTrue(text.contains("mode=w"), "non-sensitive fields still render truthfully")
+    }
+
     // MARK: shortSessionId
 
     func testShortSessionId() {
@@ -101,9 +125,18 @@ final class ClaudePermissionAdapterTests: XCTestCase {
 
     // MARK: title / subtitle distinguishability
 
-    func testBannerTitleIncludesTool() {
-        let title = ClaudePermissionAdapter.bannerTitle(toolName: "Bash", sessionId: "abc123")
+    func testBannerTitleIncludesToolAndShortSession() {
+        let title = ClaudePermissionAdapter.bannerTitle(toolName: "Bash", sessionId: "abcdef123456")
         XCTAssertTrue(title.contains("Bash"))
+        XCTAssertTrue(title.contains("abcdef"),
+                      "overlapping same-tool prompts from different sessions must be distinguishable")
+    }
+
+    func testBannerTitleOmitsSessionWhenAbsent() {
+        XCTAssertEqual(ClaudePermissionAdapter.bannerTitle(toolName: "Bash", sessionId: nil),
+                       "Claude wants to run Bash")
+        XCTAssertEqual(ClaudePermissionAdapter.bannerTitle(toolName: "Bash", sessionId: ""),
+                       "Claude wants to run Bash")
     }
 
     func testBannerSubtitleIncludesProjectAndShortSession() {

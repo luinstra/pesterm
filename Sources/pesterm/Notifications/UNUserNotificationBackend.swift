@@ -11,50 +11,106 @@ import UserNotifications
 /// - `.permission`: an Alerts-style notification carrying the `"pesterm.permission"`
 ///   category with Approve/Deny actions. Tapping Approve/Deny resolves (prints the
 ///   honored decision JSON + exit 0); a BODY click REVEALS the iTerm2 tab WITHOUT
-///   resolving so the still-blocking run loop keeps waiting for a decision or the 120s
-///   fail-safe. The fail-safe is armed at `post()` entry (before `requestAuthorization`)
-///   so a never-answered first-run auth prompt still falls back. A one-shot `ResolvedGate`
-///   guarantees exactly one of {action tap, fail-safe} finalizes.
+///   resolving so the run loop keeps waiting for a decision or the 120s fail-safe. The
+///   fail-safe is armed at `post()` entry (before `requestAuthorization`) so a never-
+///   answered first-run auth prompt still falls back. A one-shot `ResolvedGate` guarantees
+///   exactly one of {own tap, decision-store poll, fail-safe} finalizes.
 ///
-/// Dismiss caveat: UNUserNotificationCenter has NO reliable callback for a user
-/// MANUALLY dismissing a delivered notification, so there is no dismiss-driven early
-/// exit. The 600s safety cap (info) / 120s fail-safe (permission) are the backstops.
+/// CROSS-PROCESS HANDOFF: macOS delivers an action tap to ONE delegate per bundle id, not
+/// necessarily the process that POSTED the notification. So a tap for our notification may
+/// arrive at a DIFFERENT pesterm process (and vice-versa). Each permission post uses a
+/// UNIQUE id; a process that receives a tap for an id that ISN'T its own writes the decision
+/// to `DecisionStore` keyed by that id, and every process polls the store for its OWN id.
+/// That routes each decision to its rightful waiter regardless of which delegate the OS
+/// happened to hand the tap to (see `DecisionStore`).
+///
+/// Dismiss handling: UNUserNotificationCenter has NO callback for a user MANUALLY
+/// dismissing a delivered notification. Without one, a process would idle until its cap
+/// (180s info / 120s permission) even though its notification is long gone — a zombie that
+/// is ALSO a stale notification delegate stealing taps from live notifications. So we POLL
+/// `getDeliveredNotifications`: once our notification has appeared and then disappears
+/// (dismissed / cleared / expired), we exit. The caps remain the hard backstop.
 final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNotificationCenterDelegate {
 
-    static let maxLifetimeSeconds: TimeInterval = 600
+    /// Hard backstop for an IGNORED info notification (neither clicked nor dismissed — left
+    /// sitting in Notification Center). Normally the process exits far sooner via click or
+    /// dismissal (W5). 3 min: a ping you haven't touched in that long is stale.
+    static let maxLifetimeSeconds: TimeInterval = 180
+    /// Floor for a `--timeout` info-cap override (too-short is useless). No hard upper —
+    /// an info ping may legitimately persist a while.
+    static let minInfoCapSeconds: TimeInterval = 5
 
-    private var onActivate: ((String?) -> Void)?
+    /// PURE: resolve the effective info hard-cap from an optional `--timeout` override —
+    /// the default when absent/non-positive, else the override floored at `minInfoCapSeconds`.
+    static func effectiveInfoCap(override: TimeInterval?) -> TimeInterval {
+        guard let o = override, o > 0 else { return maxLifetimeSeconds }
+        return max(o, minInfoCapSeconds)
+    }
+
+    private var onActivate: ((String?, [String: String]?) -> Void)?
     private var deliveredIdentifier: String?
     private var capTimer: Timer?
 
     /// Permission-path state.
     private var requestKind: NotificationKind = .info
     private var failSafeTimer: Timer?
+    /// Polls `DecisionStore` for OUR id so a tap delivered to another process still reaches us.
+    private var pollTimer: Timer?
     private let gate = ResolvedGate()
 
+    /// Dismissal-detection state (both kinds). `sawDelivered` latches true once our
+    /// notification is observed in the delivered list, so the startup race (delivery is
+    /// async; absent for the first instant) doesn't trigger a spurious immediate exit.
+    private var dismissPollTimer: Timer?
+    private var sawDelivered = false
+
     func post(_ request: NotificationRequest,
-              onActivate: @escaping (String?) -> Void) throws {
+              onActivate: @escaping (String?, [String: String]?) -> Void) throws {
         self.onActivate = onActivate
         self.requestKind = request.kind
 
-        // PERMISSION: arm the 120s fail-safe FIRST, before requestAuthorization, so an
-        // unanswered first-run auth prompt still falls back (the auth-gap fix). On fire:
-        // emit NOTHING + exit 0 (terminal fallback), never auto-allow. Guarded by the
-        // one-shot gate so it cannot also run after an Approve/Deny tap.
+        // PERMISSION: arm the fail-safe + cross-process poll FIRST, before
+        // requestAuthorization, so an unanswered first-run auth prompt still falls back
+        // (the auth-gap fix) and a tap routed to us before we finish posting is still seen.
         if request.kind == .permission {
-            let identifier = request.groupID ?? UUID().uuidString
+            // UNIQUE id per request (NOT the shared group): concurrent prompts must not
+            // coalesce, and each needs a distinct DecisionStore key for the handoff.
+            let identifier = UUID().uuidString
             self.deliveredIdentifier = identifier
+            Trace.log("POST myId=\(identifier)")
+
+            // Best-effort cleanup of orphaned decision files from dead processes.
+            DecisionStore.sweepStale()
+
+            // Fail-safe: on fire emit NOTHING + exit 0 (terminal fallback), never auto-allow.
+            // Guarded by the one-shot gate so it cannot also run after a resolution.
             let timer = Timer.scheduledTimer(
-                withTimeInterval: PermissionFlow.timeoutSeconds,
+                withTimeInterval: PermissionFlow.effectiveTimeout(override: request.lifetimeSeconds),
                 repeats: false
             ) { [weak self] _ in
-                guard let self = self, self.gate.tryResolve() else { return }
+                guard let self = self else { return }
+                let won = self.gate.tryResolve()
+                Trace.log("FAILSAFE gateWon=\(won)")
+                guard won else { return }
+                self.pollTimer?.invalidate()
                 self.removePermissionNotification()
                 // Emit nothing; just flush + exit 0 for the terminal fallback.
                 fflush(stdout)
                 exit(0)
             }
             self.failSafeTimer = timer
+
+            // Cross-process handoff poll: a tap for OUR notification may be delivered to a
+            // different pesterm process, which records the decision in the store keyed by our
+            // id. Poll for it and resolve wherever the tap actually landed.
+            let poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                guard let self = self, let id = self.deliveredIdentifier else { return }
+                if let decision = DecisionStore.take(id: id) {
+                    Trace.log("POLL_TOOK id=\(id) decision=\(decision)")
+                    self.resolvePermission(with: decision)
+                }
+            }
+            self.pollTimer = poll
         }
 
         let center = UNUserNotificationCenter.current()
@@ -120,7 +176,25 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         if request.kind == .permission {
             content.categoryIdentifier = PermissionFlow.categoryIdentifier
         }
+        // Reveal-target handoff: ride the target in userInfo so a click delivered to any
+        // process reveals THIS notification's tab (not the receiver's captured tab).
+        if let info = request.revealUserInfo, !info.isEmpty {
+            content.userInfo = info
+        }
         return content
+    }
+
+    /// Extract the reveal-target `[String: String]` embedded in a tapped notification's
+    /// userInfo (nil if absent / not string-keyed). Lets a process reveal the CLICKED
+    /// notification's tab even when the OS delivered the tap to the wrong process.
+    private static func revealUserInfo(from response: UNNotificationResponse) -> [String: String]? {
+        let raw = response.notification.request.content.userInfo
+        guard !raw.isEmpty else { return nil }
+        var dict: [String: String] = [:]
+        for (key, value) in raw {
+            if let k = key as? String, let v = value as? String { dict[k] = v }
+        }
+        return dict.isEmpty ? nil : dict
     }
 
     private func schedule(_ request: NotificationRequest) {
@@ -135,16 +209,19 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
             content: content,
             trigger: nil // deliver immediately
         )
-        UNUserNotificationCenter.current().add(unRequest) { _ in }
+        UNUserNotificationCenter.current().add(unRequest) { error in
+            Trace.log("ADDED id=\(identifier) kind=\(request.kind) error=\(String(describing: error))")
+        }
 
-        // INFO: 600s cap is the SOLE dismiss backstop (Md). Withdraw then exit. The
-        // PERMISSION path uses the 120s fail-safe armed in post() instead, so it does
-        // NOT arm this cap.
+        // INFO: 180s cap is the HARD backstop (Md). Withdraw then exit. The PERMISSION path
+        // uses the 120s fail-safe armed in post() instead, so it does NOT arm this cap.
+        // (Dismissal — below — normally exits far sooner than either cap.)
         if request.kind == .info {
             let timer = Timer.scheduledTimer(
-                withTimeInterval: Self.maxLifetimeSeconds,
+                withTimeInterval: Self.effectiveInfoCap(override: request.lifetimeSeconds),
                 repeats: false
             ) { [weak self] _ in
+                Trace.log("CAP_FIRE kind=info")
                 if let id = self?.deliveredIdentifier {
                     UNUserNotificationCenter.current()
                         .removeDeliveredNotifications(withIdentifiers: [id])
@@ -152,6 +229,58 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
                 exit(0)
             }
             self.capTimer = timer
+        }
+
+        // BOTH kinds: poll for dismissal so the process dies with its notification instead
+        // of idling (as a stale delegate) until the cap.
+        startDismissPoll()
+    }
+
+    /// PURE: dismissal decision from a delivered-list observation. `present` = our id is in
+    /// the delivered list now; `sawDelivered` = we've seen it before. Returns the updated
+    /// latch and whether to exit. Exit only when ABSENT after having been seen (so the
+    /// async-delivery startup race — absent for the first instant — never exits early).
+    static func dismissDecision(present: Bool, sawDelivered: Bool) -> (sawDelivered: Bool, exit: Bool) {
+        if present { return (true, false) }
+        return (sawDelivered, sawDelivered)
+    }
+
+    /// Poll `getDeliveredNotifications` (~2s) and exit once our notification has appeared
+    /// and then disappeared (dismissed / cleared / expired). Both kinds.
+    private func startDismissPoll() {
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self = self, let id = self.deliveredIdentifier else { return }
+            UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+                let present = delivered.contains { $0.request.identifier == id }
+                DispatchQueue.main.async {
+                    let (saw, shouldExit) = Self.dismissDecision(present: present,
+                                                                 sawDelivered: self.sawDelivered)
+                    self.sawDelivered = saw
+                    if shouldExit { self.handleDismissed() }
+                }
+            }
+        }
+        self.dismissPollTimer = timer
+    }
+
+    /// The notification was dismissed/cleared. INFO: just exit. PERMISSION: treat as the
+    /// terminal fallback — emit NOTHING + exit 0 (gate-guarded), exactly like the fail-safe.
+    private func handleDismissed() {
+        switch requestKind {
+        case .info:
+            Trace.log("DISMISSED kind=info")
+            capTimer?.invalidate()
+            dismissPollTimer?.invalidate()
+            exit(0)
+        case .permission:
+            guard gate.tryResolve() else { return }
+            Trace.log("DISMISSED kind=permission")
+            failSafeTimer?.invalidate()
+            pollTimer?.invalidate()
+            dismissPollTimer?.invalidate()
+            removePermissionNotification()
+            fflush(stdout)
+            exit(0)
         }
     }
 
@@ -163,6 +292,31 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         center.removePendingNotificationRequests(withIdentifiers: [id])
     }
 
+    /// Finalize OUR permission flow with `decision`: claim the one-shot gate, stop the
+    /// timers, write the decision JSON to stdout, withdraw the notification, exit 0. The
+    /// loser of the race (gate already claimed) just runs `completion` and returns. Called
+    /// from BOTH the own-tap path (with the delegate's completion) and the decision-store
+    /// poll (no completion).
+    private func resolvePermission(with decision: PermissionDecision,
+                                   completion: (() -> Void)? = nil) {
+        let won = gate.tryResolve()
+        Trace.log("RESOLVE decision=\(decision) gateWon=\(won)")
+        guard won else {
+            completion?()
+            return
+        }
+        failSafeTimer?.invalidate()
+        pollTimer?.invalidate()
+        dismissPollTimer?.invalidate()
+        if let json = PermissionDecision.outputJSON(for: decision) {
+            FileHandle.standardOutput.write(Data(json.utf8))
+        }
+        fflush(stdout)
+        removePermissionNotification()
+        completion?()
+        exit(0)
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     /// Present even when frontmost. For `.permission` we still present so the Approve/Deny
@@ -172,17 +326,16 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if #available(macOS 11.0, *) {
-            completionHandler([.banner, .sound])
-        } else {
-            completionHandler([.alert, .sound])
-        }
+        // Package.swift pins macOS 11 as the floor, so .banner is always available.
+        completionHandler([.banner, .sound])
     }
 
     /// Interaction handling, branched on kind.
     /// - INFO: in-process reveal, then exit (unchanged reveal-then-exit path).
-    /// - PERMISSION: Approve/Deny resolve (print decision JSON + exit 0); a BODY/default
-    ///   click REVEALS and RETURNS WITHOUT resolving (the run loop keeps waiting).
+    /// - PERMISSION: routed through `PermissionFlow.route` because the OS may deliver this
+    ///   tap to the wrong process. Our own Approve/Deny resolves; a tap for ANOTHER
+    ///   process's notification is handed off via `DecisionStore`; our own body click
+    ///   reveals; a foreign body click is ignored.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -191,40 +344,39 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         capTimer?.invalidate()
 
         if requestKind == .info {
-            onActivate?(response.actionIdentifier)
+            onActivate?(response.actionIdentifier, Self.revealUserInfo(from: response))
             completionHandler()
             exit(0)
         }
 
         // PERMISSION.
-        let decision = PermissionFlow.decision(forActionIdentifier: response.actionIdentifier)
+        let responseId = response.notification.request.identifier
+        Trace.log("DIDRECEIVE responseId=\(responseId) myId=\(deliveredIdentifier ?? "nil") action=\(response.actionIdentifier)")
+        switch PermissionFlow.route(responseId: responseId, myId: deliveredIdentifier,
+                                    actionId: response.actionIdentifier) {
+        case .resolveOwn(let decision):
+            // Our notification, our decision — resolve + exit (completion runs first).
+            Trace.log("ROUTE=resolveOwn decision=\(decision)")
+            resolvePermission(with: decision, completion: completionHandler)
 
-        guard let decision = decision else {
-            // Body click / default id / unknown: REVEAL and KEEP WAITING. Do NOT
-            // tryResolve(), do NOT exit, do NOT invalidate the fail-safe — the
-            // Alerts notification persists and the 120s timer keeps running.
-            onActivate?(response.actionIdentifier)
+        case .recordForOther(let id, let decision):
+            // Misrouted: this tap is for another process's notification. Hand the decision
+            // off via the store keyed by THAT id; do NOT resolve ours, do NOT exit — our own
+            // tap/poll/fail-safe still has to land.
+            Trace.log("ROUTE=recordForOther id=\(id) decision=\(decision)")
+            DecisionStore.write(decision, forId: id)
             completionHandler()
-            return
-        }
 
-        // Approve / Deny: claim the one-shot resolution.
-        guard gate.tryResolve() else {
-            // The fail-safe already fired — do nothing (and it has exited).
+        case .revealOwn:
+            // Body/default click on OUR notification: reveal, keep waiting (no resolve).
+            Trace.log("ROUTE=revealOwn")
+            onActivate?(response.actionIdentifier, Self.revealUserInfo(from: response))
             completionHandler()
-            return
-        }
-        failSafeTimer?.invalidate()
-        // Let the closure observe the action too (parity with the info path); the
-        // permission closure does NOT reveal on an action id.
-        onActivate?(response.actionIdentifier)
 
-        if let json = PermissionDecision.outputJSON(for: decision) {
-            FileHandle.standardOutput.write(Data(json.utf8))
+        case .ignoreForeignBodyClick:
+            // Body click for someone else's notification — don't reveal the wrong terminal.
+            Trace.log("ROUTE=ignoreForeignBodyClick")
+            completionHandler()
         }
-        fflush(stdout)
-        removePermissionNotification()
-        completionHandler()
-        exit(0)
     }
 }

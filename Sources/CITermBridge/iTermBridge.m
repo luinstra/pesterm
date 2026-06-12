@@ -52,14 +52,14 @@
  * runs as an iTerm descendant), so macOS requires no Automation (TCC) grant in the normal
  * case — and prompts on its own in any edge case that does.
  */
-BOOL pesterm_reveal_iterm_session(NSString *targetSessionId) {
-    if (targetSessionId == nil) {
+BOOL pesterm_reveal_iterm_session(NSString *targetSessionId, NSString *bundleId) {
+    if (targetSessionId == nil || bundleId == nil) {
         return NO;
     }
 
     iTermBridgeApplication *app =
         (iTermBridgeApplication *)[SBApplication
-            applicationWithBundleIdentifier:@"com.googlecode.iterm2"];
+            applicationWithBundleIdentifier:bundleId];
     if (app == nil) {
         return NO;
     }
