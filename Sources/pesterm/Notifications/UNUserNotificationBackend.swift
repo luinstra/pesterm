@@ -40,6 +40,12 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
     /// an info ping may legitimately persist a while.
     static let minInfoCapSeconds: TimeInterval = 5
 
+    /// Grace before `exit(0)` on a TIMEOUT path so the ASYNC `removeDeliveredNotifications`
+    /// issued just before has time to land — otherwise the process dies first and the card
+    /// orphans in Notification Center (the stale card that later triggers a relaunch). The
+    /// run loop is still live, so the deferred exit fires.
+    static let withdrawFlushDelay: TimeInterval = 0.3
+
     /// PURE: resolve the effective info hard-cap from an optional `--timeout` override —
     /// the default when absent/non-positive, else the override floored at `minInfoCapSeconds`.
     static func effectiveInfoCap(override: TimeInterval?) -> TimeInterval {
@@ -94,9 +100,12 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
                 guard won else { return }
                 self.pollTimer?.invalidate()
                 self.removePermissionNotification()
-                // Emit nothing; just flush + exit 0 for the terminal fallback.
+                // Emit nothing; just flush for the terminal fallback. Defer exit so the
+                // async card removal lands before we die (no orphan).
                 fflush(stdout)
-                exit(0)
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.withdrawFlushDelay) {
+                    exit(0)
+                }
             }
             self.failSafeTimer = timer
 
@@ -226,7 +235,10 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
                     UNUserNotificationCenter.current()
                         .removeDeliveredNotifications(withIdentifiers: [id])
                 }
-                exit(0)
+                // Defer exit so the async card removal lands before we die (no orphan).
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.withdrawFlushDelay) {
+                    exit(0)
+                }
             }
             self.capTimer = timer
         }
