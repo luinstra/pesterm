@@ -37,9 +37,17 @@ private func buildRequestAndRevealer() -> (NotificationRequest, TerminalRevealer
             return (post.makeRequest(), revealer)
         }
         if parsed is RootCommand {
-            // Root with no subcommand and no --adapter: nothing to post. Show help.
-            RootCommand.main(["--help"])
-            exit(0)
+            // Bare launch, no subcommand, no --adapter. Two cases, told apart by the TTY:
+            //  - From a terminal (stdin is a TTY): the user wants help.
+            //  - From macOS/LaunchServices (no TTY): almost certainly relaunched to deliver a
+            //    notification click whose original posting process already exited. Become a
+            //    short-lived responder so the click is handled (reveal the tab via the
+            //    notification's userInfo) and macOS doesn't show "pesterm is not open anymore."
+            if isatty(STDIN_FILENO) != 0 {
+                RootCommand.main(["--help"])
+                exit(0)
+            }
+            runNotificationResponder(revealer: revealer)
         }
         // Fallthrough for PURE-CLI subcommands and ArgumentParser's own commands.
         //
@@ -168,6 +176,21 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
 private func iTermSessionIdFromEnv() -> String? {
     guard let raw = env["ITERM_SESSION_ID"], !raw.isEmpty else { return nil }
     return ITerm2Revealer.parseSessionId(raw)
+}
+
+/// Bare, non-TTY launch = macOS relaunched pesterm.app to deliver a notification action whose
+/// posting process already exited. Run a short-lived AppKit responder that handles the
+/// delivered click (reveal the CLICKED notification's tab via its userInfo / hand off a
+/// permission decision) and exits — so the click still works and macOS doesn't surface
+/// "pesterm is not open anymore." Never returns (the responder or its stray-launch timeout
+/// calls exit).
+private func runNotificationResponder(revealer: TerminalRevealer?) -> Never {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory) // no Dock/menu-bar presence (LSUIElement).
+    let responder = NotificationResponder(revealer: revealer)
+    app.delegate = responder
+    app.run()
+    exit(0)
 }
 
 // MARK: - Entry point
