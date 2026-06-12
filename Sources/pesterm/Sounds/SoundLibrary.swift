@@ -64,4 +64,15 @@ enum SoundLibrary {
     static func resolves(_ name: String) -> Bool {
         return NSSound(named: NSSound.Name(name)) != nil
     }
+
+    /// Tokens for `--sound` that mean "post with NO sound" (silence). Forgiving synonyms.
+    static let silenceTokens: Set<String> = ["none", "off", "silent", "mute", "silence"]
+
+    /// PURE: does this `--sound` value request silence? Case-insensitive, trimmed.
+    /// nil/empty/other → false (a real sound name or the per-event default stands).
+    static func isSilenceToken(_ value: String?) -> Bool {
+        guard let v = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !v.isEmpty else { return false }
+        return silenceTokens.contains(v)
+    }
 }

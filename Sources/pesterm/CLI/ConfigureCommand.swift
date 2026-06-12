@@ -41,7 +41,7 @@ struct ConfigureCommand: ParsableCommand {
     @Flag(name: .long, help: "Re-run setup even if pesterm is already configured — overwrites existing hook wiring (incl. hand-edited per-event sounds/timeouts). Without it, an already-wired setup is left untouched.")
     var force: Bool = false
 
-    @Option(name: .long, help: "Notification sound override (e.g. Glass). Omit to keep per-event defaults. Run `pesterm sounds` for valid names.")
+    @Option(name: .long, help: "Notification sound override (e.g. Glass), or 'none' to silence. Omit to keep per-event defaults. Run `pesterm sounds` for valid names.")
     var sound: String?
 
     @Option(name: .long, help: ArgumentHelp("Override the target settings file.", visibility: .private))
@@ -163,10 +163,14 @@ struct ConfigureCommand: ParsableCommand {
         if keepDefaults { return nil }
 
         while true {
-            print("Sound name (blank to keep defaults; run `pesterm sounds` for the list): ", terminator: "")
+            print("Sound name (blank to keep defaults, 'none' to silence; run `pesterm sounds` for the list): ", terminator: "")
             guard let line = readLine() else { return nil }
             let name = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if name.isEmpty { return nil }
+            if SoundLibrary.isSilenceToken(name) {
+                print("  Sound: none (silent).")
+                return "none"
+            }
             guard let snd = NSSound(named: NSSound.Name(name)) else {
                 print("  '\(name)' not found — try again.")
                 continue
@@ -205,7 +209,11 @@ struct ConfigureCommand: ParsableCommand {
                              command: String, interactive: Bool) {
         reportWiredHooks(agentKey: agentKey, targetPath: targetPath)
         if let soundChoice = soundChoice {
-            print("  sound: \(soundChoice) (all events)")
+            if SoundLibrary.isSilenceToken(soundChoice) {
+                print("  sound: none (silent, all events)")
+            } else {
+                print("  sound: \(soundChoice) (all events)")
+            }
         } else {
             print("  sound: per-event defaults (Morse / Hero / Pop)")
         }

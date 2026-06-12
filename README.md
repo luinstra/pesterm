@@ -106,6 +106,10 @@ pesterm sample Glass    # play one to audition it before committing
 (`.aiff`, `.wav`, `.caf`, `.m4a`, …) into `~/Library/Sounds` and use its filename (no
 extension) as the `--sound` name.
 
+**Silence:** `--sound none` (also `off` / `silent` / `mute`) posts with **no sound** — for
+the whole setup (`pesterm configure --sound none`) or per event by putting it on a single
+matcher in the `settings.json` below (e.g. silence idle pings, keep approvals audible).
+
 > Heads-up: the newer macOS Tahoe alert sounds (Boop, etc.) aren't name-addressable — only
 > the classic system set and your custom-folder sounds resolve by name.
 

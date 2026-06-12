@@ -165,6 +165,9 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
                                soundOverride: soundOverride) {
     case .post(var request):
         request.lifetimeSeconds = timeoutOverride
+        // `--sound none` (and synonyms) silences the notification — uniformly, even on the
+        // permission path that otherwise ignores --sound (force nil here, post-build).
+        if SoundLibrary.isSilenceToken(soundOverride) { request.sound = nil }
         return (request, revealer)
     case .suppress(let message):
         FileHandle.standardError.write(Data((message + "\n").utf8))

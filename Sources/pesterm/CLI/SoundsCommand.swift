@@ -32,6 +32,7 @@ struct SoundsCommand: ParsableCommand {
         }
         print("")
         print("Use any name above with --sound, e.g.  pesterm configure claude --sound \(entries[0].name)")
+        print("Or  --sound none  (also: off / silent / mute) to post with NO sound.")
         Foundation.exit(0)
     }
 }
