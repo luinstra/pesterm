@@ -4,6 +4,10 @@ import Foundation
 /// terminal = appending a type here + one new conformance.
 enum RevealerRegistry {
     static let revealers: [TerminalRevealer.Type] = [
+        // tmux FIRST: inside tmux, ITERM_SESSION_ID is present-but-stale, so the tmux
+        // revealer must win detection (first-match-wins below). It returns nil when not in
+        // tmux, falling through to the iTerm revealer (non-tmux path unchanged).
+        TmuxRevealer.self,
         ITerm2Revealer.self
     ]
 

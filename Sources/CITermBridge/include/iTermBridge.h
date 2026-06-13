@@ -176,3 +176,13 @@ typedef enum iTermBridgeSaveOptions iTermBridgeSaveOptions;
  */
 BOOL pesterm_reveal_iterm_session(NSString *targetSessionId, NSString *bundleId);
 
+/*
+ * Like pesterm_reveal_iterm_session, but matches the session by its TTY
+ * (`iTermBridgeSession.tty`, e.g. "/dev/ttys003") instead of its `id`. Used by the tmux
+ * revealer: under tmux there is no iTerm session GUID to match, so we resolve the attached
+ * tmux client's tty and front the iTerm session whose tty equals it. Comparison is on the
+ * whitespace-trimmed tty. Returns YES if a session matched and window/tab/session were
+ * selected; NO otherwise (caller falls back to fronting the app only).
+ */
+BOOL pesterm_reveal_iterm_session_by_tty(NSString *tty, NSString *bundleId);
+

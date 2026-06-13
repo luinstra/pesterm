@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import CITermBridge
 
 /// iTerm2 revealer (v1). Detects via TERM_PROGRAM + ITERM_SESSION_ID, then reveals
@@ -68,7 +67,7 @@ final class ITerm2Revealer: TerminalRevealer {
     func reveal() throws {
         // Step 1: bring iTerm2 to front via AppKit (in the hook flow it is always
         // already running, so the running-app path is the norm; C1 covers not-running).
-        bringITermToFront()
+        ITermFront.bringToFront(bundleID: Self.iTermBundleID)
 
         // Step 2: enumerate windows -> tabs -> sessions, match .id, select — done in
         // Objective-C (pesterm_reveal_iterm_session). ScriptingBridge's
@@ -85,28 +84,6 @@ final class ITerm2Revealer: TerminalRevealer {
             // error path beyond stderr; iTerm2 was still fronted in step 1.
             FileHandle.standardError.write(
                 Data("pesterm: iTerm2 session \(targetSessionId) not found; revealed app only\n".utf8))
-        }
-    }
-
-    /// Bring iTerm2 to the foreground.
-    private func bringITermToFront() {
-        let running = NSRunningApplication.runningApplications(
-            withBundleIdentifier: Self.iTermBundleID)
-        if let iterm = running.first {
-            // V5: from an LSUIElement accessory app, .activateAllWindows alone may not
-            // reliably raise iTerm2; add .activateIgnoringOtherApps.
-            // NOTE: .activateIgnoringOtherApps is DEPRECATED on macOS 14+ — when the min
-            // target moves to 14+, switch to the parameterless NSRunningApplication.activate().
-            iterm.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-            return
-        }
-
-        // C1: iTerm2 not running. NSWorkspace has no direct "open by bundle id"; resolve
-        // via LaunchServices then openApplication. (In the hook flow this is rare.)
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.iTermBundleID) {
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
         }
     }
 }

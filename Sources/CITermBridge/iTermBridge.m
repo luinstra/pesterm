@@ -80,3 +80,45 @@ BOOL pesterm_reveal_iterm_session(NSString *targetSessionId, NSString *bundleId)
 
     return NO;
 }
+
+/*
+ * pesterm_reveal_iterm_session_by_tty — same traversal, matching session.tty instead of
+ * session.id (see header). For the tmux path: front the iTerm session whose tty equals the
+ * attached tmux client's tty. Both sides report the full "/dev/ttysNNN" path; we trim both
+ * before comparing to tolerate stray whitespace/newlines.
+ */
+BOOL pesterm_reveal_iterm_session_by_tty(NSString *tty, NSString *bundleId) {
+    if (tty == nil || bundleId == nil) {
+        return NO;
+    }
+
+    NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSString *targetTty = [tty stringByTrimmingCharactersInSet:ws];
+    if (targetTty.length == 0) {
+        return NO;
+    }
+
+    iTermBridgeApplication *app =
+        (iTermBridgeApplication *)[SBApplication
+            applicationWithBundleIdentifier:bundleId];
+    if (app == nil) {
+        return NO;
+    }
+
+    for (iTermBridgeWindow *window in app.windows) {
+        for (iTermBridgeTab *tab in window.tabs) {
+            for (iTermBridgeSession *session in tab.sessions) {
+                NSString *sessionTty = session.tty;
+                if (sessionTty != nil &&
+                    [[sessionTty stringByTrimmingCharactersInSet:ws] isEqualToString:targetTty]) {
+                    [window select];
+                    [tab select];
+                    [session select];
+                    return YES;
+                }
+            }
+        }
+    }
+
+    return NO;
+}
