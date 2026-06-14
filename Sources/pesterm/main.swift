@@ -215,6 +215,12 @@ if env["PESTERM_PRINT_REQUEST"] != nil {
     print("body: \(request.body)")
     print("sound: \(request.sound ?? "<nil>")")
     print("group: \(request.groupID ?? "<nil>")")
+    // Diagnostic: which revealer/target the env produced (nil = no revealer detected).
+    if let info = request.revealUserInfo {
+        print("reveal: \(info.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+    } else {
+        print("reveal: <nil>")
+    }
     exit(0)
 }
 

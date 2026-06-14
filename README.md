@@ -33,12 +33,20 @@ macOS grants, and links you to anything still needed. Re-running is safe (idempo
 If `~/.local/bin` isn't on your `PATH`, the installer prints the `export PATH=…` line to
 add to your shell profile.
 
-### One-time macOS grant
+### One-time macOS grants
 
 **Allow notifications** for pesterm — macOS prompts the first time pesterm posts; click
-**Allow**. That's the only grant pesterm needs. (The jump-to-tab reveal drives iTerm from
-an iTerm-descendant process, so it needs no Automation grant.) Detail in
-**[SETUP.md](./SETUP.md)**.
+**Allow**. Normally that's the only grant needed: the jump-to-tab reveal drives iTerm from
+an iTerm-descendant process (self-automation), so it needs no Automation grant.
+
+**Using tmux? One extra grant.** Inside tmux, pesterm runs under the tmux *server* (a
+background daemon), not as a descendant of iTerm — so self-automation doesn't apply and the
+reveal needs permission to control iTerm. macOS shows a one-time **"pesterm wants to control
+iTerm2"** prompt the first time you click a notification from a tmux session — click **OK**.
+If you dismissed it, the tab/pane won't switch (iTerm just comes to the front); enable it
+under **System Settings → Privacy & Security → Automation → pesterm → iTerm**.
+
+Detail in **[SETUP.md](./SETUP.md)**.
 
 ## Usage
 

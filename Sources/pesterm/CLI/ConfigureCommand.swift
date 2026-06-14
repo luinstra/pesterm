@@ -235,9 +235,11 @@ struct ConfigureCommand: ParsableCommand {
         }
     }
 
-    /// Report (and, when interactive, offer to fix) the notifications grant — the only grant
-    /// pesterm needs (the reveal is self-automation from an iTerm-descendant process). Live-
-    /// read from the pure-CLI path; never prompts for the grant itself.
+    /// Report (and, when interactive, offer to fix) the notifications grant. Notifications is
+    /// normally the only grant pesterm needs (the reveal is self-automation from an
+    /// iTerm-descendant process) — EXCEPT under tmux, where pesterm runs under the tmux
+    /// daemon (not iTerm) and the reveal needs an iTerm Automation grant. Live-read from the
+    /// pure-CLI path; never prompts for the grant itself.
     private func reportGrants(interactive: Bool) {
         print("")
         print("Grants:")
@@ -251,6 +253,16 @@ struct ConfigureCommand: ParsableCommand {
             } else {
                 print("    → enable under System Settings → Notifications → pesterm")
             }
+        }
+
+        // Under tmux, pesterm is NOT an iTerm descendant, so the jump-to-tab reveal needs an
+        // Automation grant (approve the "pesterm wants to control iTerm2" prompt). Surface it
+        // here so tmux users don't discover it via a reveal that silently fronts iTerm only.
+        if ProcessInfo.processInfo.environment["TMUX"] != nil {
+            print("  iTerm automation (tmux): the jump-to-tab reveal needs permission to")
+            print("    control iTerm. Approve the one-time \"pesterm wants to control iTerm2\"")
+            print("    prompt, or enable pesterm under System Settings → Privacy & Security")
+            print("    → Automation. (Not needed outside tmux.)")
         }
     }
 

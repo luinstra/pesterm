@@ -29,13 +29,24 @@ pesterm status
 **Allow notifications.** The FIRST time pesterm posts, macOS shows a one-time
 **"pesterm wants to send you notifications"** prompt (the UserNotifications authorization
 grant). Click **Allow**. If you deny it, banners are suppressed until you re-enable pesterm
-under **System Settings → Notifications → pesterm**. This is the only grant pesterm needs.
+under **System Settings → Notifications → pesterm**.
 
-The jump-to-tab reveal drives iTerm via Apple Events but needs **no Automation grant**:
-pesterm runs as a descendant of iTerm (spawned by the hook), so the reveal is
-self-automation, which macOS allows without a grant. The bundle still carries
-`NSAppleEventsUsageDescription`, so in the rare config where a grant *is* needed, macOS
-prompts for it on its own at that moment — nothing to set up in advance.
+**Automation grant: not needed normally, REQUIRED under tmux.** The jump-to-tab reveal
+drives iTerm via Apple Events. Normally pesterm runs as a descendant of iTerm (spawned by
+the hook), so the reveal is *self-automation* — macOS allows it with no grant. The bundle
+carries `NSAppleEventsUsageDescription` for the rare config where a grant is needed.
+
+Inside **tmux**, that's exactly such a config: tmux's server is a background daemon (its
+parent is launchd, not iTerm), so a hook fired inside tmux is NOT an iTerm descendant.
+Self-automation no longer covers it, and the reveal needs an Automation grant to control
+iTerm. macOS shows a one-time **"pesterm wants to control iTerm2"** prompt the first time
+you click a notification from a tmux session — click **OK**. Symptom if it's missing/denied:
+clicking fronts iTerm but does NOT switch to the right tab/pane (the tmux lookup succeeds,
+but the Apple Event that selects the iTerm session is blocked). Re-enable under **System
+Settings → Privacy & Security → Automation → pesterm → iTerm**.
+
+(All other pesterm features — notifications, sounds, `--timeout`, approve/deny — work under
+tmux with no extra grant; only the click-to-jump reveal needs it.)
 
 ## Claude Code hook wiring (done for you by `configure`)
 

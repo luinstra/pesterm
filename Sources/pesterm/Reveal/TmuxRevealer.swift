@@ -64,17 +64,26 @@ final class TmuxRevealer: TerminalRevealer {
         // Always front iTerm first (best-effort, like the iTerm path) so even a fallback
         // lands the user on iTerm.
         ITermFront.bringToFront(bundleID: ITerm2Revealer.iTermBundleID)
+        Trace.log("TMUX_REVEAL fronted iTerm socket=\(socket) pane=\(pane)")
 
         guard let launcher = TmuxClient.locateLauncher() else {
+            Trace.log("TMUX_REVEAL launcher=nil")
             warn("tmux not found; revealed iTerm app only")
             return
         }
+        Trace.log("TMUX_REVEAL launcher=\(launcher.exe) prefix=\(launcher.prefixArgs)")
 
-        switch TmuxClient.attachedClientTTY(launcher: launcher, socket: socket, pane: pane) {
+        let choice = TmuxClient.attachedClientTTY(launcher: launcher, socket: socket, pane: pane)
+        Trace.log("TMUX_REVEAL clientChoice=\(String(describing: choice))")
+        switch choice {
         case .one(let tty):
-            if pesterm_reveal_iterm_session_by_tty(tty, ITerm2Revealer.iTermBundleID) {
+            let found = pesterm_reveal_iterm_session_by_tty(tty, ITerm2Revealer.iTermBundleID)
+            Trace.log("TMUX_REVEAL byTty tty=\(tty) found=\(found)")
+            if found {
                 // Tab fronted — now snap onto the originating pane.
-                if !TmuxClient.selectPane(launcher: launcher, socket: socket, pane: pane) {
+                let snapped = TmuxClient.selectPane(launcher: launcher, socket: socket, pane: pane)
+                Trace.log("TMUX_REVEAL selectPane=\(snapped)")
+                if !snapped {
                     warn("tmux snap to pane \(pane) failed (pane may have closed); revealed tab only")
                 }
             } else {
