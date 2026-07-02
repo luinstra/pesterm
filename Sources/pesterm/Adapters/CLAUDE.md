@@ -72,11 +72,14 @@ a new side-effecting tool is never silently un-gated. "Silence is not safety."
 `Write <file_path>`, `WebFetch <url>`). Never a target-hiding `"<tool> permission"`. The OS
 truncates the banner; the full text is reachable via the body-click reveal.
 
-### Reveal target: env, not payload
+### Coalescing key: env, not payload
 
-`buildRequest(... iTermSessionId:)` takes the iTerm2 GUID from `ITERM_SESSION_ID` (the env,
-resolved in `main.swift`) purely for the coalescing group. `payload.session_id` is only the
-short human label in the title/subtitle. This mirrors the root invariant — don't cross them.
+`buildRequest(... coalescingKey:)` takes the terminal-context key from the env (resolved
+in `main.swift` via `CoalescingKey.fromEnv` — tmux socket+pane inside tmux, where
+`ITERM_SESSION_ID` is shared/stale across panes and would coalesce DIFFERENT panes'
+notifications into one card; else the iTerm2 GUID) purely for the coalescing group.
+`payload.session_id` is only the short human label in the title/subtitle. This mirrors
+the root invariant — don't cross them.
 
 ### Distinct group prefixes
 

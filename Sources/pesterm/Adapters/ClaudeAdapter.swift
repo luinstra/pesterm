@@ -67,13 +67,13 @@ enum ClaudeAdapter {
     /// itself stays pure — the override is applied here at the call site so per-event
     /// defaults remain untouched and a user can still wire distinct `--sound` values on
     /// separate matcher entries.
-    static func buildRequest(from payload: Payload, iTermSessionId: String?,
+    static func buildRequest(from payload: Payload, coalescingKey: String?,
                              soundOverride: String? = nil) -> NotificationRequest? {
         guard let mapped = eventMapping(notificationType: payload.notificationType) else {
             return nil
         }
         let subtitle = projectSubtitle(cwd: payload.cwd)
-        let group: String? = iTermSessionId.map { groupPrefix + $0 }
+        let group: String? = coalescingKey.map { groupPrefix + $0 }
         return NotificationRequest(
             title: title,
             subtitle: subtitle,
@@ -105,12 +105,12 @@ extension ClaudeAdapter: AgentAdapter {
 
     /// PURE: parse the Notification hook JSON and map it to a post or a suppression — the
     /// info branch the old main.swift `buildFromAdapter` ran inline, now behind the protocol.
-    static func outcome(stdin: Data, iTermSessionId: String?,
+    static func outcome(stdin: Data, coalescingKey: String?,
                         soundOverride: String?) -> AdapterOutcome {
         guard let payload = parse(stdin) else {
             return .suppress("pesterm: empty or invalid Claude hook JSON; nothing posted")
         }
-        guard let request = buildRequest(from: payload, iTermSessionId: iTermSessionId,
+        guard let request = buildRequest(from: payload, coalescingKey: coalescingKey,
                                          soundOverride: soundOverride) else {
             // Suppressed (auth_success) or unknown/missing type (C3).
             let type = payload.notificationType ?? "<missing>"

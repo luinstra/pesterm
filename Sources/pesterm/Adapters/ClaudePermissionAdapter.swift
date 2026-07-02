@@ -226,14 +226,15 @@ enum ClaudePermissionAdapter {
         return (path as NSString).lastPathComponent
     }
 
-    /// PURE: build a `.permission` `NotificationRequest`. `iTermSessionId` is the iTerm2
-    /// GUID from the env (NOT the payload), used ONLY for the coalescing group; the
-    /// payload's `session_id` drives the human-readable short id in the title/subtitle.
+    /// PURE: build a `.permission` `NotificationRequest`. `coalescingKey` is the
+    /// env-derived terminal-context key (NOT the payload — tmux socket+pane inside tmux,
+    /// else the iTerm2 GUID), used ONLY for the coalescing group; the payload's
+    /// `session_id` drives the human-readable short id in the title/subtitle.
     /// Returns nil only when there is nothing approvable to render (defensive).
     static func buildRequest(from payload: PermissionPayload,
-                             iTermSessionId: String?) -> NotificationRequest? {
+                             coalescingKey: String?) -> NotificationRequest? {
         let body = approvableText(from: payload)
-        let group: String? = iTermSessionId.map { groupPrefix + $0 }
+        let group: String? = coalescingKey.map { groupPrefix + $0 }
         return NotificationRequest(
             title: bannerTitle(toolName: payload.toolName, sessionId: payload.sessionId),
             subtitle: bannerSubtitle(toolName: payload.toolName, cwd: payload.cwd,
@@ -256,7 +257,7 @@ extension ClaudePermissionAdapter: AgentAdapter {
     /// PURE: parse the PermissionRequest hook JSON and map it to a post or a suppression.
     /// Interactive/meta tools (the `unmediatedTools` denylist) suppress to a terminal
     /// fallback — NEVER an auto-allow. `soundOverride` is ignored on the permission path.
-    static func outcome(stdin: Data, iTermSessionId: String?,
+    static func outcome(stdin: Data, coalescingKey: String?,
                         soundOverride: String?) -> AdapterOutcome {
         guard let payload = parse(stdin) else {
             return .suppress("pesterm: empty or invalid Claude PermissionRequest JSON; nothing posted")
@@ -264,7 +265,7 @@ extension ClaudePermissionAdapter: AgentAdapter {
         guard shouldMediate(payload.toolName) else {
             return .suppress("pesterm: tool '\(payload.toolName ?? "?")' is not mediated; terminal fallback")
         }
-        guard let request = buildRequest(from: payload, iTermSessionId: iTermSessionId) else {
+        guard let request = buildRequest(from: payload, coalescingKey: coalescingKey) else {
             return .suppress("pesterm: nothing approvable in PermissionRequest; nothing posted")
         }
         return .post(request)

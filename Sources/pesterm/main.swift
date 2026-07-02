@@ -161,10 +161,11 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
     // Read stdin BEFORE NSApp.run() (PP1). readDataToEndOfFile returns at EOF.
     let data = FileHandle.standardInput.readDataToEndOfFile()
 
-    // iTerm2 session id from the env (NOT payload). Used only for reveal/coalescing.
-    let iTermSessionId = iTermSessionIdFromEnv()
+    // Terminal-context coalescing key from the env (NOT payload): tmux socket+pane inside
+    // tmux (ITERM_SESSION_ID is shared/stale there), else the iTerm2 session GUID.
+    let coalescingKey = CoalescingKey.fromEnv(env)
 
-    switch adapterType.outcome(stdin: data, iTermSessionId: iTermSessionId,
+    switch adapterType.outcome(stdin: data, coalescingKey: coalescingKey,
                                soundOverride: soundOverride) {
     case .post(var request):
         request.lifetimeSeconds = timeoutOverride
@@ -176,12 +177,6 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
         FileHandle.standardError.write(Data((message + "\n").utf8))
         exit(0)
     }
-}
-
-/// The iTerm2 session GUID from the inherited env (last colon-component, PP2), or nil.
-private func iTermSessionIdFromEnv() -> String? {
-    guard let raw = env["ITERM_SESSION_ID"], !raw.isEmpty else { return nil }
-    return ITerm2Revealer.parseSessionId(raw)
 }
 
 /// Bare, non-TTY launch = macOS relaunched pesterm.app to deliver a notification action whose

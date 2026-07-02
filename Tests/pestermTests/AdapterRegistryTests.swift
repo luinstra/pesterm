@@ -43,7 +43,7 @@ final class AdapterRegistryTests: XCTestCase {
     // MARK: outcome — info adapter
 
     func testInfoEmptyStdinSuppresses() {
-        guard case .suppress = ClaudeAdapter.outcome(stdin: Data(), iTermSessionId: nil,
+        guard case .suppress = ClaudeAdapter.outcome(stdin: Data(), coalescingKey: nil,
                                                      soundOverride: nil) else {
             return XCTFail("empty stdin should suppress")
         }
@@ -52,7 +52,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testInfoValidPayloadPosts() {
         let json = #"{"notification_type":"idle_prompt","cwd":"/x/proj"}"#
         guard case .post(let req) = ClaudeAdapter.outcome(stdin: Data(json.utf8),
-                                                          iTermSessionId: "G",
+                                                          coalescingKey: "G",
                                                           soundOverride: nil) else {
             return XCTFail("valid idle_prompt should post")
         }
@@ -63,7 +63,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testInfoAuthSuccessSuppressesWithReason() {
         let json = #"{"notification_type":"auth_success"}"#
         guard case .suppress(let msg) = ClaudeAdapter.outcome(stdin: Data(json.utf8),
-                                                              iTermSessionId: nil,
+                                                              coalescingKey: nil,
                                                               soundOverride: nil) else {
             return XCTFail("auth_success should suppress")
         }
@@ -73,7 +73,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testInfoSoundOverrideApplies() {
         let json = #"{"notification_type":"idle_prompt"}"#
         guard case .post(let req) = ClaudeAdapter.outcome(stdin: Data(json.utf8),
-                                                          iTermSessionId: nil,
+                                                          coalescingKey: nil,
                                                           soundOverride: "Glass") else {
             return XCTFail("idle_prompt should post")
         }
@@ -83,7 +83,7 @@ final class AdapterRegistryTests: XCTestCase {
     // MARK: outcome — permission adapter
 
     func testPermissionEmptyStdinSuppresses() {
-        guard case .suppress = ClaudePermissionAdapter.outcome(stdin: Data(), iTermSessionId: nil,
+        guard case .suppress = ClaudePermissionAdapter.outcome(stdin: Data(), coalescingKey: nil,
                                                                soundOverride: nil) else {
             return XCTFail("empty stdin should suppress")
         }
@@ -92,7 +92,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testPermissionUnmediatedToolSuppresses() {
         let json = #"{"tool_name":"AskUserQuestion","tool_input":{}}"#
         guard case .suppress(let msg) = ClaudePermissionAdapter.outcome(stdin: Data(json.utf8),
-                                                                        iTermSessionId: nil,
+                                                                        coalescingKey: nil,
                                                                         soundOverride: nil) else {
             return XCTFail("AskUserQuestion should suppress to terminal fallback")
         }
@@ -102,7 +102,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testPermissionMediatedToolPosts() {
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s"}"#
         guard case .post(let req) = ClaudePermissionAdapter.outcome(stdin: Data(json.utf8),
-                                                                    iTermSessionId: "G",
+                                                                    coalescingKey: "G",
                                                                     soundOverride: nil) else {
             return XCTFail("Bash should post a permission request")
         }
@@ -114,7 +114,7 @@ final class AdapterRegistryTests: XCTestCase {
         // --sound applies to the info path only; permission sound is fixed.
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#
         guard case .post(let req) = ClaudePermissionAdapter.outcome(stdin: Data(json.utf8),
-                                                                    iTermSessionId: nil,
+                                                                    coalescingKey: nil,
                                                                     soundOverride: "Glass") else {
             return XCTFail("Bash should post")
         }

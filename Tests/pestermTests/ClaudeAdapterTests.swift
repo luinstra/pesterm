@@ -84,7 +84,7 @@ final class ClaudeAdapterTests: XCTestCase {
     func testBuildRequestPermissionPrompt() {
         let payload = ClaudeAdapter.parse(
             Data(#"{"notification_type":"permission_prompt","cwd":"/x/proj"}"#.utf8))!
-        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: "GUID123")
+        let req = ClaudeAdapter.buildRequest(from: payload, coalescingKey: "GUID123")
         XCTAssertNotNil(req)
         XCTAssertEqual(req?.title, "Claude Code")
         XCTAssertEqual(req?.subtitle, "proj")
@@ -97,13 +97,13 @@ final class ClaudeAdapterTests: XCTestCase {
     func testBuildRequestSuppressedReturnsNil() {
         let payload = ClaudeAdapter.parse(
             Data(#"{"notification_type":"auth_success"}"#.utf8))!
-        XCTAssertNil(ClaudeAdapter.buildRequest(from: payload, iTermSessionId: "GUID"))
+        XCTAssertNil(ClaudeAdapter.buildRequest(from: payload, coalescingKey: "GUID"))
     }
 
     func testBuildRequestNilSessionIdNoGroup() {
         let payload = ClaudeAdapter.parse(
             Data(#"{"notification_type":"idle_prompt","cwd":"/a/b"}"#.utf8))!
-        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: nil)
+        let req = ClaudeAdapter.buildRequest(from: payload, coalescingKey: nil)
         XCTAssertNil(req?.groupID)
         XCTAssertEqual(req?.body, "Awaiting your input")
         XCTAssertEqual(req?.sound, "Morse")
@@ -114,7 +114,7 @@ final class ClaudeAdapterTests: XCTestCase {
     func testBuildRequestSoundOverrideReplacesDefault() {
         let payload = ClaudeAdapter.parse(
             Data(#"{"notification_type":"permission_prompt","cwd":"/x/proj"}"#.utf8))!
-        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: "G",
+        let req = ClaudeAdapter.buildRequest(from: payload, coalescingKey: "G",
                                              soundOverride: "Glass")
         XCTAssertEqual(req?.sound, "Glass", "override replaces the Hero default")
         // The rest of the mapping is untouched.
@@ -124,7 +124,7 @@ final class ClaudeAdapterTests: XCTestCase {
     func testBuildRequestNoOverrideKeepsDefault() {
         let payload = ClaudeAdapter.parse(
             Data(#"{"notification_type":"permission_prompt"}"#.utf8))!
-        let req = ClaudeAdapter.buildRequest(from: payload, iTermSessionId: nil,
+        let req = ClaudeAdapter.buildRequest(from: payload, coalescingKey: nil,
                                              soundOverride: nil)
         XCTAssertEqual(req?.sound, "Hero", "no override → per-event default stands")
     }
@@ -134,10 +134,10 @@ final class ClaudeAdapterTests: XCTestCase {
         let idle = ClaudeAdapter.parse(Data(#"{"notification_type":"idle_prompt"}"#.utf8))!
         let elic = ClaudeAdapter.parse(Data(#"{"notification_type":"elicitation_dialog"}"#.utf8))!
         XCTAssertEqual(
-            ClaudeAdapter.buildRequest(from: idle, iTermSessionId: nil, soundOverride: "Glass")?.sound,
+            ClaudeAdapter.buildRequest(from: idle, coalescingKey: nil, soundOverride: "Glass")?.sound,
             "Glass")
         XCTAssertEqual(
-            ClaudeAdapter.buildRequest(from: elic, iTermSessionId: nil, soundOverride: "Glass")?.sound,
+            ClaudeAdapter.buildRequest(from: elic, coalescingKey: nil, soundOverride: "Glass")?.sound,
             "Glass")
     }
 

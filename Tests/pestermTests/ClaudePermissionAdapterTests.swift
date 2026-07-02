@@ -156,7 +156,7 @@ final class ClaudePermissionAdapterTests: XCTestCase {
     func testBuildRequestGroupIsPermPrefixed() {
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/x/proj","session_id":"s"}"#
         let p = ClaudePermissionAdapter.parse(Data(json.utf8))!
-        let req = ClaudePermissionAdapter.buildRequest(from: p, iTermSessionId: "GUID123")
+        let req = ClaudePermissionAdapter.buildRequest(from: p, coalescingKey: "GUID123")
         XCTAssertEqual(req?.groupID, "claude-perm-GUID123")
         XCTAssertNotEqual(req?.groupID, "claude-GUID123")
     }
@@ -166,7 +166,7 @@ final class ClaudePermissionAdapterTests: XCTestCase {
     func testBuildRequestIsPermissionKind() {
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"/x/proj","session_id":"abcdef"}"#
         let p = ClaudePermissionAdapter.parse(Data(json.utf8))!
-        let req = ClaudePermissionAdapter.buildRequest(from: p, iTermSessionId: "G")!
+        let req = ClaudePermissionAdapter.buildRequest(from: p, coalescingKey: "G")!
         XCTAssertEqual(req.kind, .permission)
         XCTAssertEqual(req.body, "ls -la")
         XCTAssertEqual(req.sound, "Hero")
@@ -178,7 +178,7 @@ final class ClaudePermissionAdapterTests: XCTestCase {
     func testBuildRequestNilSessionNoGroup() {
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#
         let p = ClaudePermissionAdapter.parse(Data(json.utf8))!
-        let req = ClaudePermissionAdapter.buildRequest(from: p, iTermSessionId: nil)
+        let req = ClaudePermissionAdapter.buildRequest(from: p, coalescingKey: nil)
         XCTAssertNil(req?.groupID)
     }
 }

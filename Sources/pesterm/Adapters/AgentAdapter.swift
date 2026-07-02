@@ -23,9 +23,11 @@ protocol AgentAdapter {
     /// Whether this adapter posts an info notification or a blocking permission request.
     static var kind: NotificationKind { get }
 
-    /// PURE: map the hook JSON on `stdin` to an outcome. `iTermSessionId` is the
-    /// env-derived reveal/coalescing key (NEVER the payload's session id). `soundOverride`
-    /// (from `--sound`) applies to info adapters; permission adapters ignore it.
-    static func outcome(stdin: Data, iTermSessionId: String?,
+    /// PURE: map the hook JSON on `stdin` to an outcome. `coalescingKey` is the
+    /// env-derived terminal-context key (`CoalescingKey.fromEnv`: tmux socket+pane inside
+    /// tmux, else the iTerm2 GUID — NEVER the payload's session id), used only to group
+    /// notifications. `soundOverride` (from `--sound`) applies to info adapters;
+    /// permission adapters ignore it.
+    static func outcome(stdin: Data, coalescingKey: String?,
                         soundOverride: String?) -> AdapterOutcome
 }
