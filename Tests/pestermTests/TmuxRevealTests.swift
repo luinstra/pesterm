@@ -117,6 +117,15 @@ final class TmuxRevealTests: XCTestCase {
         XCTAssertTrue(RevealerRegistry.detect(env) is ITerm2Revealer)
     }
 
+    // MARK: launcher probe list
+
+    func testSearchPathsCoverHomebrewMacPortsAndSystem() {
+        XCTAssertTrue(TmuxClient.searchPaths.contains("/opt/local/bin/tmux"), "MacPorts")
+        XCTAssertTrue(TmuxClient.searchPaths.contains("/opt/homebrew/bin/tmux"))
+        XCTAssertEqual(TmuxClient.searchPaths.last, "/usr/bin/tmux",
+                       "system tmux is the last resort")
+    }
+
     // MARK: makeContent embedding (the userInfo reaches the notification)
 
     func testTmuxTargetEmbeddedInNotificationUserInfo() {

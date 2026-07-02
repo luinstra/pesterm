@@ -16,12 +16,20 @@ enum TmuxClient {
         let prefixArgs: [String]
     }
 
+    /// Absolute install locations probed in order: Homebrew (Apple Silicon, Intel),
+    /// MacPorts, then the system tmux as last resort.
+    static let searchPaths = [
+        "/opt/homebrew/bin/tmux",
+        "/usr/local/bin/tmux",
+        "/opt/local/bin/tmux",
+        "/usr/bin/tmux",
+    ]
+
     /// Resolve a launcher, or nil if tmux can't be found (caller falls back to fronting the
     /// app only). Absolute paths first (no subprocess); PATH probe via `env` only if needed.
     static func locateLauncher() -> Launcher? {
         let fm = FileManager.default
-        for path in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
-        where fm.isExecutableFile(atPath: path) {
+        for path in searchPaths where fm.isExecutableFile(atPath: path) {
             return Launcher(exe: path, prefixArgs: [])
         }
         // PATH fallback: verify `env tmux` resolves before committing to it.
