@@ -67,7 +67,7 @@ final class ITerm2Revealer: TerminalRevealer {
     func reveal() throws {
         // Step 1: bring iTerm2 to front via AppKit (in the hook flow it is always
         // already running, so the running-app path is the norm; C1 covers not-running).
-        ITermFront.bringToFront(bundleID: Self.iTermBundleID)
+        AppFront.bringToFront(bundleID: Self.iTermBundleID)
 
         // Step 2: enumerate windows -> tabs -> sessions, match .id, select — done in
         // Objective-C (pesterm_reveal_iterm_session). ScriptingBridge's

@@ -124,6 +124,18 @@ final class StatusCommandTests: XCTestCase {
         XCTAssertFalse(StatusCommand.resolvesOnPath("pesterm"))
     }
 
+    // The Ghostty automation status line is installed-app-gated (pure seam; the live
+    // NSWorkspace gating is covered by manual check M7).
+    func testGhosttyStatusLineOnlyWhenInstalled() {
+        XCTAssertNil(AutomationGrant.statusLine(appName: "Ghostty", installed: false,
+                                                state: .needsPrompt))
+        let line = AutomationGrant.statusLine(appName: "Ghostty", installed: true,
+                                              state: .denied)
+        XCTAssertNotNil(line)
+        XCTAssertTrue(line?.hasPrefix("Ghostty automation") == true)
+        XCTAssertTrue(line?.contains("Automation") == true, "denied state text rides along")
+    }
+
     // binEntryTarget resolves a symlink (legacy layout).
     func testBinEntryTargetResolvesSymlink() throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())

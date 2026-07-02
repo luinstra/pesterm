@@ -162,7 +162,9 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
     let data = FileHandle.standardInput.readDataToEndOfFile()
 
     // Terminal-context coalescing key from the env (NOT payload): tmux socket+pane inside
-    // tmux (ITERM_SESSION_ID is shared/stale there), else the iTerm2 session GUID.
+    // tmux (ITERM_SESSION_ID is shared/stale there), ghostty:<normalized PWD> inside
+    // Ghostty (nil without a PWD — under-coalesce, never a shared bucket), else the
+    // iTerm2 session GUID.
     let coalescingKey = CoalescingKey.fromEnv(env)
 
     switch adapterType.outcome(stdin: data, coalescingKey: coalescingKey,

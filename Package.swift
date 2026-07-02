@@ -19,10 +19,18 @@ let package = Package(
             path: "Sources/CITermBridge",
             publicHeadersPath: "include"
         ),
+        // Same shape for the Ghostty ScriptingBridge header (vendored, generated from
+        // Ghostty 1.3.1's sdef — see docs/ghostty-sdef-findings.md).
+        .target(
+            name: "CGhosttyBridge",
+            path: "Sources/CGhosttyBridge",
+            publicHeadersPath: "include"
+        ),
         .executableTarget(
             name: "pesterm",
             dependencies: [
                 "CITermBridge",
+                "CGhosttyBridge",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/pesterm",

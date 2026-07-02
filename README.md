@@ -4,8 +4,8 @@
 
 pesterm is a native macOS notifier for terminal-based AI coding agents. When your agent
 needs you — it wants permission, has a question, or just finished a turn — pesterm posts a
-notification. Click it and you land on the **exact iTerm2 tab** the agent is running in,
-across windows and split panes.
+notification. Click it and you land on the **exact terminal tab** the agent is running in —
+iTerm2 (across windows and split panes) or Ghostty ≥ 1.3 (matched by working directory).
 
 For **Claude Code** it does one more thing: **approve or deny tool permissions straight
 from the notification**, without switching back to the terminal.
@@ -16,7 +16,8 @@ an additive adapter — see [DESIGN.md](./DESIGN.md)).
 ## Requirements
 
 - macOS 11 (Big Sur) or later
-- iTerm2 (the jump-to-tab reveal drives iTerm2)
+- iTerm2, or Ghostty ≥ 1.3 (the jump-to-tab reveal drives them via Apple Events; Ghostty
+  needs a one-time Automation grant for click-reveal — see [SETUP.md](./SETUP.md))
 - A Swift toolchain to build (Xcode or the Swift command-line tools)
 
 ## Install
@@ -43,8 +44,9 @@ an iTerm-descendant process (self-automation), so it needs no Automation grant.
 background daemon), not as a descendant of iTerm — so self-automation doesn't apply and the
 reveal needs permission to control iTerm. macOS shows a one-time **"pesterm wants to control
 iTerm2"** prompt the first time you click a notification from a tmux session — click **OK**.
-If you dismissed it, the tab/pane won't switch (iTerm just comes to the front); enable it
-under **System Settings → Privacy & Security → Automation → pesterm → iTerm**.
+If you dismissed it, clicking performs no reveal at all (nothing is fronted; stderr says
+"no reveal performed" and names the cause); enable it under **System Settings → Privacy &
+Security → Automation → pesterm → iTerm**.
 
 Detail in **[SETUP.md](./SETUP.md)**.
 

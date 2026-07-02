@@ -257,12 +257,27 @@ struct ConfigureCommand: ParsableCommand {
 
         // Under tmux, pesterm is NOT an iTerm descendant, so the jump-to-tab reveal needs an
         // Automation grant (approve the "pesterm wants to control iTerm2" prompt). Surface it
-        // here so tmux users don't discover it via a reveal that silently fronts iTerm only.
+        // here so tmux users don't discover it via a click that fronts nothing and only
+        // explains itself on stderr ("no reveal performed").
         if ProcessInfo.processInfo.environment["TMUX"] != nil {
             print("  iTerm automation (tmux): the jump-to-tab reveal needs permission to")
             print("    control iTerm. Approve the one-time \"pesterm wants to control iTerm2\"")
             print("    prompt, or enable pesterm under System Settings → Privacy & Security")
             print("    → Automation. (Not needed outside tmux.)")
+        }
+
+        // Ghostty mirror of the TMUX block: clicks handled by the relaunch responder
+        // (pesterm launched by LaunchServices after the posting process exited) are not
+        // Ghostty descendants, so the jump-to-tab reveal needs the Ghostty Automation
+        // grant. Posting works without it; only click-reveal needs it. Known heuristic
+        // gap, accepted: a Ghostty user running `configure` from a non-Ghostty shell
+        // won't see this guidance — `status` (installed-app-gated) is the durable surface.
+        if ProcessInfo.processInfo.environment["TERM_PROGRAM"] == GhosttyEnv.termProgramValue {
+            print("  Ghostty automation: the jump-to-tab reveal needs permission to control")
+            print("    Ghostty. Approve the one-time \"pesterm wants to control Ghostty\"")
+            print("    prompt (it appears on the first click-reveal), or enable pesterm under")
+            print("    System Settings → Privacy & Security → Automation. Notifications post")
+            print("    fine without it — only the jump-to-tab click needs it.")
         }
     }
 

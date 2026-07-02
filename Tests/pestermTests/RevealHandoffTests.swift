@@ -19,7 +19,31 @@ final class RevealHandoffTests: XCTestCase {
     }
 
     func testRegistryRejectsUnknownTerminalTag() {
-        XCTAssertNil(RevealerRegistry.revealer(from: ["terminal": "ghostty", "session": "x"]))
+        // "kitty" is genuinely unregistered. (This fixture used to say "ghostty" — now
+        // that GhosttyRevealer is registered, that dict reconstructs an app-only
+        // revealer instead of nil; see testGhosttyTagWithoutCwdIsAppOnly.)
+        XCTAssertNil(RevealerRegistry.revealer(from: ["terminal": "kitty", "session": "x"]))
+    }
+
+    func testGhosttyRevealUserInfoRoundTrips() {
+        let r = GhosttyRevealer(cwd: "/proj")
+        let info = r.revealUserInfo
+        XCTAssertEqual(info["terminal"], "ghostty")
+        XCTAssertEqual(info["cwd"], "/proj")
+
+        let rebuilt = RevealerRegistry.revealer(from: info)
+        XCTAssertEqual((rebuilt as? GhosttyRevealer)?.cwd, "/proj",
+                       "a revealer reconstructed from userInfo must target the same cwd")
+    }
+
+    func testGhosttyTagWithoutCwdIsAppOnly() {
+        // A tag-only ghostty dict is a valid APP-ONLY target (Ghostty has no per-surface
+        // env var; the dict is self-sufficient for the relaunch responder) — non-nil,
+        // unlike a truly unknown tag.
+        let rebuilt = RevealerRegistry.revealer(from: ["terminal": "ghostty"])
+        let ghostty = rebuilt as? GhosttyRevealer
+        XCTAssertNotNil(ghostty)
+        XCTAssertNil(ghostty?.cwd)
     }
 
     func testRegistryRejectsMissingOrEmptySession() {

@@ -57,7 +57,8 @@ race and Claude gets a clean fallback rather than its own timeout.
 
 ### Body click = REVEAL, then terminal fallback (the card is consumed)
 
-Tapping the notification *body* (the default action) reveals the iTerm2 tab and **does not
+Tapping the notification *body* (the default action) reveals the terminal tab (whichever
+revealer the userInfo names — iTerm2, tmux pane, or Ghostty) and **does not
 itself resolve** — only the Approve/Deny action buttons map to a decision
 (`PermissionFlow.decision(forActionIdentifier:)` returns nil for the body/unknown).
 But macOS removes the card from Notification Center on a body click, so there is nothing

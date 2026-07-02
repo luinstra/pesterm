@@ -126,6 +126,74 @@ final class TmuxRevealTests: XCTestCase {
                        "system tmux is the last resort")
     }
 
+    // MARK: failureDiagnostic — every failure branch fronts NOTHING (D5)
+
+    // Since the reveal-time reorder, iTerm is fronted only AFTER a verified
+    // attached-client tty match. Every failure branch therefore ends in
+    // "no reveal performed" — the old "revealed app only" suffix would be a lie.
+
+    func testFailureDiagnosticsAllEndInNoRevealPerformed() {
+        let all: [TmuxRevealer.RevealFailure] = [
+            .tmuxNotFound,
+            .detached,
+            .multiple,
+            .queryFailed,
+            .byTtyMiss(tty: "/dev/ttys003", grant: .granted),
+            .byTtyMiss(tty: "/dev/ttys003", grant: .denied),
+        ]
+        for failure in all {
+            let s = TmuxRevealer.failureDiagnostic(failure, pane: "%3")
+            XCTAssertTrue(s.hasSuffix("no reveal performed"),
+                          "nothing was fronted — the copy must say so: \(s)")
+        }
+    }
+
+    func testFailureDiagnosticTmuxNotFound() {
+        XCTAssertEqual(TmuxRevealer.failureDiagnostic(.tmuxNotFound, pane: "%3"),
+                       "tmux not found; no reveal performed")
+    }
+
+    func testFailureDiagnosticDetachedNotesITermOnly() {
+        let s = TmuxRevealer.failureDiagnostic(.detached, pane: "%3")
+        XCTAssertTrue(s.contains("%3"))
+        XCTAssertTrue(s.contains("detached"))
+        XCTAssertTrue(s.contains("iTerm-only"),
+                      "tmux reveal is iTerm-only — the copy must say so")
+    }
+
+    func testFailureDiagnosticMultiple() {
+        let s = TmuxRevealer.failureDiagnostic(.multiple, pane: "%3")
+        XCTAssertTrue(s.contains("multiple tmux clients"))
+        XCTAssertTrue(s.contains("%3"))
+    }
+
+    func testFailureDiagnosticQueryFailed() {
+        let s = TmuxRevealer.failureDiagnostic(.queryFailed, pane: "%3")
+        XCTAssertTrue(s.contains("tmux query failed"))
+        XCTAssertTrue(s.contains("%3"))
+    }
+
+    func testByTtyMissWithGrantBlamesTheClientNotTheGrant() {
+        // Grant fine + no iTerm session matched the client tty: the likeliest cause is
+        // a client attached from a NON-iTerm terminal (e.g. tmux under Ghostty).
+        let s = TmuxRevealer.failureDiagnostic(
+            .byTtyMiss(tty: "/dev/ttys003", grant: .granted), pane: "%3")
+        XCTAssertTrue(s.contains("/dev/ttys003"))
+        XCTAssertTrue(s.contains("may not be attached from iTerm"),
+                      "the client may live in another terminal app — say so")
+        XCTAssertFalse(s.contains("Automation"),
+                       "grant is fine — don't send the user to System Settings")
+    }
+
+    func testByTtyMissWithoutGrantBlamesTheGrant() {
+        for grant in [AutomationGrant.State.denied, .needsPrompt] {
+            let s = TmuxRevealer.failureDiagnostic(
+                .byTtyMiss(tty: "/dev/ttys003", grant: grant), pane: "%3")
+            XCTAssertTrue(s.contains("Automation") || s.contains("automation"),
+                          "missing grant must be named — this failure was silent for weeks")
+        }
+    }
+
     // MARK: makeContent embedding (the userInfo reaches the notification)
 
     func testTmuxTargetEmbeddedInNotificationUserInfo() {

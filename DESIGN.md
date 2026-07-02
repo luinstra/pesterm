@@ -59,7 +59,7 @@ reveal) plus a swappable **notification backend**:
                                               +---------------------------------+--------------------+
                                               |                                                      |
                                      [NotificationBackend]                                  [TerminalRevealer]
-                                  UNUserNotification                               iTerm2 via ScriptingBridge + AppKit (v1)
+                                  UNUserNotification                               iTerm2 + Ghostty via ScriptingBridge + AppKit
                                   (behind the protocol)                            other terminals later, behind the protocol
 ```
 
@@ -96,9 +96,10 @@ struct NotificationRequest {
 }
 ```
 
-A registry holds `[TerminalRevealer.Type]`, picks the first match, iTerm2 first.
-Adding a terminal = one new conformance + a registry entry. Core, notification,
-and click-wiring never change.
+A registry holds `[TerminalRevealer.Type]`, picks the first match: tmux first
+(it must beat the stale `ITERM_SESSION_ID` every pane inherits), then the
+mutually-exclusive iTerm2/Ghostty pair. Adding a terminal = one new conformance
++ a registry entry. Core, notification, and click-wiring never change.
 
 ### iTerm2 revealer (v1)
 
@@ -113,9 +114,37 @@ and click-wiring never change.
   - **Capability:** `.precise`.
 - **Verify at build time** that iTerm2's `.sdef` exposes `id` + `select` as expected.
 
+### Ghostty revealer
+
+- **Detect:** `TERM_PROGRAM == "ghostty"` (exact, lowercase — the value Ghostty's own
+  docs test). No per-surface env var exists (no `TERM_SESSION_ID` equivalent —
+  ghostty discussions #9084/#10603), so the precise key is the **working directory**:
+  `$PWD` captured from the terminal env at detect time. No `PWD` → still detects,
+  capability `.appOnly` (front the right app beats no reveal).
+- **Reveal (native, Ghostty ≥ 1.3 AppleScript — a preview API):** front
+  `com.mitchellh.ghostty`, then enumerate windows → tabs → terminals via
+  ScriptingBridge (`CGhosttyBridge`), match each terminal's `working directory`
+  against the captured cwd. **Exactly one match** → `activate window` + `select tab` +
+  `focus` (belt-and-braces; focus-alone semantics unverified — see
+  `docs/ghostty-sdef-findings.md`). Zero or many → app-front + a grant-aware stderr
+  diagnostic. Never guess.
+- **Grant:** relaunch-responder clicks (pesterm launched by LaunchServices) are not
+  Ghostty descendants → the Apple Events need the one-time Ghostty **Automation (TCC)
+  grant**, surfaced in `status` (when Ghostty is installed) and `configure` (when run
+  inside Ghostty). An ungranted traversal sees zero windows — the diagnostic names the
+  grant only when the grant is the problem.
+- **Documented limitations:** two surfaces in the same directory reveal as app-front
+  (ambiguous by design; also the coalescing-key collision case). If the agent's tab
+  `cd`-ed away while a sibling sits in the captured `$PWD`, the sibling is revealed
+  (bounded misdirection). Self-heals if ghostty#11592 lands a `tty` property — the
+  match key then upgrades to the hook's controlling tty.
+- **Capability:** `.precise` with a cwd, `.appOnly` without — the first revealer whose
+  capability varies (still metadata-only).
+
 ### Native-first rule (future terminals)
 
-- ScriptingBridge / AppKit where the terminal is scriptable (iTerm2, Terminal.app).
+- ScriptingBridge / AppKit where the terminal is scriptable (iTerm2, Ghostty ≥ 1.3,
+  Terminal.app).
 - Shell out to the terminal's own CLI **only** where there is no Apple Events
   interface — WezTerm (`wezterm cli activate-pane`), Kitty (`kitty @ focus-window`).
   Confined to those providers; explicitly the exception, never the norm.
@@ -185,6 +214,13 @@ pesterm post \
 - **Banner icon = posting bundle**; can't override per-notification.
 - **`ITERM_SESSION_ID` is inherited from the agent's env** — reveal reads env, never the payload.
 - **The app must outlive the post** to handle the click; model the keep-alive explicitly.
+- **tmux reveal is iTerm-only, and fronting follows evidence:** iTerm is fronted only
+  AFTER a verified attached-client tty match; on any other outcome (detached, multiple
+  clients, query failure, tty miss) NOTHING is fronted — the tmux server may be hosted
+  by Ghostty/Terminal.app, where fronting iTerm is actively the wrong app. So
+  tmux-under-Ghostty degrades to "notification posts, click fronts nothing" by design,
+  and a genuine tmux-under-iTerm miss no longer gets the old "front iTerm anyway"
+  consolation (fronting on a guess was the bug class).
 
 ## 11a. Tool approvals (blocking `PermissionRequest` hook) — NOTIFICATION-BUTTONS v1
 

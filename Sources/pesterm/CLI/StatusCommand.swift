@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import ArgumentParser
 
 /// `pesterm status` — report install + wiring state, and surface the running process's
@@ -100,14 +101,28 @@ struct StatusCommand: ParsableCommand {
             }
         }
 
-        // Manual-grant reminders. Notifications: macOS prompts on the first post. iTerm
-        // Automation: needed ONLY for the tmux jump-to-tab reveal — outside tmux the
-        // reveal is self-automation (pesterm is an iTerm descendant) and needs no grant.
-        // The check never triggers the consent prompt (askUserIfNeeded=false).
+        // Manual-grant reminders. Notifications: macOS prompts on the first post.
+        // Automation grants (checks never trigger the consent prompt —
+        // askUserIfNeeded=false):
+        //  - iTerm: needed ONLY for the tmux jump-to-tab reveal (outside tmux the reveal
+        //    is self-automation — pesterm is an iTerm descendant — and needs no grant).
+        //  - Ghostty: needed for relaunch-responder clicks (a LaunchServices-launched
+        //    pesterm is no Ghostty descendant); line printed only when Ghostty is
+        //    installed, to avoid noise for everyone else.
         print("")
         print("Manual grant (one-time): allow notifications when macOS prompts on the first post.")
         print("iTerm automation (needed for the tmux reveal only): "
-              + AutomationGrant.describe(AutomationGrant.checkITerm()))
+              + AutomationGrant.describe(AutomationGrant.checkITerm(), appName: "iTerm2"))
+        let ghosttyInstalled = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: GhosttyRevealer.ghosttyBundleID) != nil
+        let ghosttyState = ghosttyInstalled
+            ? AutomationGrant.checkGhostty()
+            : AutomationGrant.State.undetermined("Ghostty not installed")
+        if let line = AutomationGrant.statusLine(appName: "Ghostty",
+                                                 installed: ghosttyInstalled,
+                                                 state: ghosttyState) {
+            print(line)
+        }
 
         Foundation.exit(0)
     }

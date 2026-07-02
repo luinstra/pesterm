@@ -11,8 +11,10 @@ import CITermBridge
 /// from the relaunch/responder process (which has no `$TMUX`): `tmux -S <socket>` needs no env.
 ///
 /// Registered BEFORE `ITerm2Revealer` so it wins detection inside tmux (where a stale
-/// `ITERM_SESSION_ID` is also present). Every failure degrades to "front iTerm + stderr" —
-/// identical to the existing stale-session miss, never worse.
+/// `ITERM_SESSION_ID` is also present). Fronting follows evidence: a verified match
+/// fronts iTerm; every failure degrades to stderr only — never front an app on a guess
+/// (the tmux server may be hosted by Ghostty/Terminal.app, where fronting iTerm is
+/// actively the wrong app).
 final class TmuxRevealer: TerminalRevealer {
 
     /// Terminal tag in the reveal-target userInfo handoff.
@@ -61,14 +63,14 @@ final class TmuxRevealer: TerminalRevealer {
     // MARK: - Reveal
 
     func reveal() throws {
-        // Always front iTerm first (best-effort, like the iTerm path) so even a fallback
-        // lands the user on iTerm.
-        ITermFront.bringToFront(bundleID: ITerm2Revealer.iTermBundleID)
-        Trace.log("TMUX_REVEAL fronted iTerm socket=\(socket) pane=\(pane)")
-
+        // Fronting follows evidence: query FIRST, front only after the attached client
+        // provably lives in an iTerm session. The old shape fronted iTerm before knowing
+        // anything — actively the wrong app when the tmux server is hosted by
+        // Ghostty/Terminal.app. ScriptingBridge `select` works on a non-frontmost app,
+        // so select-then-activate is equivalent to the old activate-then-select.
         guard let launcher = TmuxClient.locateLauncher() else {
             Trace.log("TMUX_REVEAL launcher=nil")
-            warn("tmux not found; revealed iTerm app only")
+            warn(Self.failureDiagnostic(.tmuxNotFound, pane: pane))
             return
         }
         Trace.log("TMUX_REVEAL launcher=\(launcher.exe) prefix=\(launcher.prefixArgs)")
@@ -80,7 +82,9 @@ final class TmuxRevealer: TerminalRevealer {
             let found = pesterm_reveal_iterm_session_by_tty(tty, ITerm2Revealer.iTermBundleID)
             Trace.log("TMUX_REVEAL byTty tty=\(tty) found=\(found)")
             if found {
-                // Tab fronted — now snap onto the originating pane.
+                // The client provably lives in an iTerm session — fronting is justified.
+                AppFront.bringToFront(bundleID: ITerm2Revealer.iTermBundleID)
+                Trace.log("TMUX_REVEAL fronted iTerm socket=\(socket) pane=\(pane)")
                 let snapped = TmuxClient.selectPane(launcher: launcher, socket: socket, pane: pane)
                 Trace.log("TMUX_REVEAL selectPane=\(snapped)")
                 if !snapped {
@@ -93,28 +97,55 @@ final class TmuxRevealer: TerminalRevealer {
                 // when the grant is actually the problem.
                 let grant = AutomationGrant.checkITerm()
                 Trace.log("TMUX_REVEAL byTtyMiss grant=\(grant)")
-                warn(Self.byTtyMissDiagnostic(tty: tty, grant: grant))
+                warn(Self.failureDiagnostic(.byTtyMiss(tty: tty, grant: grant), pane: pane))
             }
         case .detached:
-            warn("no attached tmux client for pane \(pane) (detached?); revealed app only")
+            warn(Self.failureDiagnostic(.detached, pane: pane))
         case .multiple:
-            warn("multiple tmux clients for pane \(pane); revealed app only")
+            warn(Self.failureDiagnostic(.multiple, pane: pane))
         case nil:
-            warn("tmux query failed for pane \(pane); revealed app only")
+            warn(Self.failureDiagnostic(.queryFailed, pane: pane))
         }
     }
 
-    /// PURE: the diagnostic for "attached client tty found, but no iTerm session matched".
-    /// With the grant in place that genuinely means no matching tab; without it the
-    /// message must name the Automation grant — this exact failure was silent and
+    /// The reveal's failure branches — every one fronts NOTHING (we cannot know which
+    /// app owns the tmux client; fronting iTerm on a guess was the bug D5 fixed).
+    enum RevealFailure: Equatable {
+        case tmuxNotFound
+        case detached
+        case multiple
+        case queryFailed
+        /// Attached client tty found, but no iTerm session matched it.
+        case byTtyMiss(tty: String, grant: AutomationGrant.State)
+    }
+
+    /// PURE: one diagnostic per failure branch. All end in "no reveal performed" — since
+    /// the D5 reorder nothing is fronted on failure, so the old "revealed app only"
+    /// suffix would be a lie. The by-tty-miss/detached variants note that the client may
+    /// not be attached from iTerm at all (tmux reveal is iTerm-only); with the grant
+    /// missing, the message must name it — that exact failure was silent and
     /// misattributed before (iTerm fronts, no tab switch, no hint why).
-    static func byTtyMissDiagnostic(tty: String, grant: AutomationGrant.State) -> String {
-        switch grant {
-        case .granted:
-            return "no iTerm tab for tmux client tty \(tty); revealed app only"
-        default:
-            return "tmux reveal blocked — iTerm automation \(AutomationGrant.describe(grant)); "
-                 + "revealed app only"
+    static func failureDiagnostic(_ failure: RevealFailure, pane: String) -> String {
+        switch failure {
+        case .tmuxNotFound:
+            return "tmux not found; no reveal performed"
+        case .detached:
+            return "no attached tmux client for pane \(pane) (detached? note tmux reveal "
+                 + "is iTerm-only); no reveal performed"
+        case .multiple:
+            return "multiple tmux clients for pane \(pane); no reveal performed"
+        case .queryFailed:
+            return "tmux query failed for pane \(pane); no reveal performed"
+        case .byTtyMiss(let tty, let grant):
+            switch grant {
+            case .granted:
+                return "no iTerm tab for tmux client tty \(tty) — the client may not be "
+                     + "attached from iTerm (tmux reveal is iTerm-only); no reveal performed"
+            default:
+                return "tmux reveal blocked — iTerm automation "
+                     + AutomationGrant.describe(grant, appName: "iTerm2")
+                     + "; no reveal performed"
+            }
         }
     }
 

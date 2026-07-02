@@ -1,11 +1,11 @@
 import Foundation
 import AppKit
 
-/// Shared "bring iTerm2 to the foreground" used by BOTH the iTerm revealer and the tmux
-/// revealer, so they front iTerm identically. Extracted from `ITerm2Revealer` so the tmux
-/// path reuses the exact same activation (incl. the macOS 14 `.activateIgnoringOtherApps`
-/// note) without instantiating an iTerm revealer (it has no session GUID under tmux).
-enum ITermFront {
+/// Shared "bring a terminal app to the foreground" used by ALL revealers (iTerm2, tmux,
+/// Ghostty), so they front their app identically. Bundle-id-parameterized from day one;
+/// renamed from `ITermFront` when Ghostty arrived to keep the shared-activation intent
+/// honest (incl. the macOS 14 `.activateIgnoringOtherApps` note).
+enum AppFront {
     /// Activate the app with `bundleID` (running → activate; not running → launch).
     static func bringToFront(bundleID: String) {
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)

@@ -41,12 +41,46 @@ parent is launchd, not iTerm), so a hook fired inside tmux is NOT an iTerm desce
 Self-automation no longer covers it, and the reveal needs an Automation grant to control
 iTerm. macOS shows a one-time **"pesterm wants to control iTerm2"** prompt the first time
 you click a notification from a tmux session — click **OK**. Symptom if it's missing/denied:
-clicking fronts iTerm but does NOT switch to the right tab/pane (the tmux lookup succeeds,
-but the Apple Event that selects the iTerm session is blocked). Re-enable under **System
-Settings → Privacy & Security → Automation → pesterm → iTerm**.
+clicking performs NO reveal at all — nothing is fronted (pesterm never fronts an app it
+can't verify), and stderr prints "tmux reveal blocked — iTerm automation …; no reveal
+performed". Re-enable under **System Settings → Privacy & Security → Automation →
+pesterm → iTerm**.
 
 (All other pesterm features — notifications, sounds, `--timeout`, approve/deny — work under
 tmux with no extra grant; only the click-to-jump reveal needs it.)
+
+**Ad-hoc signing re-prompts.** pesterm is ad-hoc signed, and macOS keys Automation (TCC)
+grants to the code identity — so every rebuild/reinstall re-prompts the Automation grants
+(iTerm and Ghostty alike). Known friction; approve again after an update.
+
+## Ghostty (requires Ghostty ≥ 1.3)
+
+pesterm reveals Ghostty tabs via Ghostty's AppleScript support, added in Ghostty 1.3
+(a **preview** API; Ghostty 1.3 itself requires macOS 13+ — pesterm's own macOS 11 floor
+is unaffected, but a Big Sur/Monterey host can't run a Ghostty new enough for precise
+reveal; the app-front reveal still works there). Ghostty has no per-surface env var, so
+the reveal matches the **working directory** captured when the notification posted:
+exactly one Ghostty terminal in that directory → its window/tab is fronted and focused;
+zero or several → Ghostty is fronted app-only and stderr says why.
+
+- **Automation grant.** Clicks handled by a relaunched pesterm (the posting process
+  already exited) are not Ghostty descendants, so the reveal needs the one-time
+  **"pesterm wants to control Ghostty"** consent — it appears on the first such
+  click-reveal. Notifications post fine without it; only the jump-to-tab click needs it.
+  Re-enable under **System Settings → Privacy & Security → Automation → pesterm →
+  Ghostty**. `pesterm status` shows the grant state whenever Ghostty is installed.
+- **`macos-applescript = false`** in your Ghostty config disables its scripting
+  dictionary entirely — precise reveal degrades to fronting the app (no crash, stderr
+  names the possible causes).
+- **Shell integration** is what keeps Ghostty's reported working directory current; with
+  it disabled, terminals may report no/stale directories and the reveal degrades to
+  app-front.
+- **Two tabs in the same directory** are ambiguous by design: the click fronts the app
+  only, and their notifications share one coalescing card. Separate directories (e.g.
+  git worktrees) avoid both.
+- **tmux inside Ghostty is not supported**: notifications post, but the click performs
+  no jump-to-tab (the tmux reveal is iTerm-only, and pesterm never fronts an app it
+  can't verify — with the tmux client attached from Ghostty, the click fronts nothing).
 
 ## Claude Code hook wiring (done for you by `configure`)
 
@@ -188,8 +222,10 @@ longer exists — the running process's bundle identity, and the manual-grant re
 | unknown / missing   | (suppressed)          | —     |
 
 Title is always `Claude Code`; subtitle is the basename of `cwd`; the coalescing group
-is `claude-<iTerm2 session id>` where the session id is the LAST colon-component of the
-inherited `ITERM_SESSION_ID` (never the agent payload).
+is `claude-<terminal key>` where the terminal key comes from the inherited terminal env
+(never the agent payload): the iTerm2 session GUID (last colon-component of
+`ITERM_SESSION_ID`), `tmux:<socket>:<pane>` inside tmux, or `ghostty:<normalized PWD>`
+inside Ghostty (no PWD → no group; the post is simply uncoalesced).
 
 ## Sounds (`--sound`, `pesterm sounds`, `pesterm sample`)
 

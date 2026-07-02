@@ -39,7 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Fall back to this process's env-detected revealer when no target rode along.
                 let target = revealUserInfo.flatMap { RevealerRegistry.revealer(from: $0) } ?? revealer
                 guard let target = target else { return }
-                Trace.log("REVEAL target=\(revealUserInfo?["pane"] ?? revealUserInfo?["session"] ?? "nil") source=\(revealUserInfo != nil ? "userInfo" : "fallback")")
+                // The traced target key is per-terminal: tmux pane / iTerm session /
+                // ghostty cwd (an app-only ghostty dict has none — trace its tag).
+                Trace.log("REVEAL target=\(revealUserInfo?["pane"] ?? revealUserInfo?["session"] ?? revealUserInfo?["cwd"] ?? revealUserInfo?["terminal"] ?? "nil") source=\(revealUserInfo != nil ? "userInfo" : "fallback")")
                 do {
                     try target.reveal()
                 } catch {

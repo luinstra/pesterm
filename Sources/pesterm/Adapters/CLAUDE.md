@@ -77,9 +77,11 @@ truncates the banner; the full text is reachable via the body-click reveal.
 `buildRequest(... coalescingKey:)` takes the terminal-context key from the env (resolved
 in `main.swift` via `CoalescingKey.fromEnv` — tmux socket+pane inside tmux, where
 `ITERM_SESSION_ID` is shared/stale across panes and would coalesce DIFFERENT panes'
-notifications into one card; else the iTerm2 GUID) purely for the coalescing group.
-`payload.session_id` is only the short human label in the title/subtitle. This mirrors
-the root invariant — don't cross them.
+notifications into one card; `ghostty:<normalized PWD>` inside Ghostty, which has no
+per-surface env var, and nil when Ghostty has no PWD — under-coalesce, never a shared
+bucket; else the iTerm2 GUID) purely for the coalescing group. `payload.session_id` is
+only the short human label in the title/subtitle. This mirrors the root invariant —
+don't cross them.
 
 ### Distinct group prefixes
 

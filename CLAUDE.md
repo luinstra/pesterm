@@ -23,7 +23,7 @@ spins up AppKit so the notification can deliver and its callbacks fire. The flow
 ```
 hook JSON ─▶ Adapters ─▶ NotificationRequest ─▶ Notifications backend ─▶ macOS
 (stdin)                                                  │
-                                          tap ──▶ Reveal (iTerm2) / Permission decision
+                                          tap ──▶ Reveal (iTerm2, Ghostty) / Permission decision
 ```
 
 | Layer | Dir | Job |
@@ -32,11 +32,11 @@ hook JSON ─▶ Adapters ─▶ NotificationRequest ─▶ Notifications backen
 | Adapters | `Sources/pesterm/Adapters/` | Claude hook JSON → request; permission decision → JSON |
 | Notifications | `Sources/pesterm/Notifications/` | `UNUserNotificationCenter` post + delegate callbacks |
 | Permission | `Sources/pesterm/Permission/` | Blocking Approve/Deny flow, one-shot gate, fail-safe |
-| Reveal | `Sources/pesterm/Reveal/` | Bring the iTerm2 tab/session forward (ScriptingBridge) |
+| Reveal | `Sources/pesterm/Reveal/` | Bring the terminal tab/session forward (iTerm2, Ghostty — ScriptingBridge) |
 | Wiring | `Sources/pesterm/Wiring/` | Surgically edit `~/.claude/settings.json` hooks |
 | CLI | `Sources/pesterm/CLI/` | `configure`/`status`/`sounds`/`sample`/`post`/`unwire` |
 | Sounds | `Sources/pesterm/Sounds/` | Named system-sound catalog |
-| C bridge | `Sources/CITermBridge/` | Generated iTerm2 ScriptingBridge umbrella header |
+| C bridge | `Sources/CITermBridge/`, `Sources/CGhosttyBridge/` | Generated iTerm2/Ghostty ScriptingBridge umbrella headers |
 
 ## Quick Commands
 

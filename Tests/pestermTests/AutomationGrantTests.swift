@@ -1,67 +1,87 @@
 import XCTest
 @testable import pesterm
 
-/// Pure core of the iTerm Automation (TCC) grant check — the tmux reveal's ScriptingBridge
-/// tab-select needs this grant (pesterm is a tmux-daemon descendant there, not iTerm's), and
-/// a missing grant used to fail SILENTLY with a misleading "no iTerm tab" diagnostic. The
-/// impure AEDeterminePermissionToAutomateTarget call is a thin shell around these.
+/// Pure core of the Automation (TCC) grant check — needed by the tmux reveal path
+/// (pesterm is a tmux-daemon descendant there, not iTerm's) and the Ghostty
+/// relaunch-responder click path (LaunchServices-launched pesterm is no Ghostty
+/// descendant). A missing grant used to fail SILENTLY with a misleading "no tab"
+/// diagnostic. The impure AEDeterminePermissionToAutomateTarget call is a thin shell
+/// around these. Every helper takes the app name explicitly — a defaulted parameter
+/// would silently reintroduce the wrong-app string.
 final class AutomationGrantTests: XCTestCase {
 
     // MARK: OSStatus → State
 
     func testNoErrIsGranted() {
-        XCTAssertEqual(AutomationGrant.state(forAEResult: 0), .granted)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: 0, appName: "iTerm2"), .granted)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: 0, appName: "Ghostty"), .granted)
     }
 
     func testNotPermittedIsDenied() {
         // errAEEventNotPermitted — the user clicked "Don't Allow" (or a profile denies).
-        XCTAssertEqual(AutomationGrant.state(forAEResult: -1743), .denied)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -1743, appName: "iTerm2"), .denied)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -1743, appName: "Ghostty"), .denied)
     }
 
     func testWouldRequireConsentNeedsPrompt() {
         // errAEEventWouldRequireUserConsent — never asked yet (we pass askUserIfNeeded=false).
-        XCTAssertEqual(AutomationGrant.state(forAEResult: -1744), .needsPrompt)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -1744, appName: "iTerm2"), .needsPrompt)
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -1744, appName: "Ghostty"), .needsPrompt)
     }
 
-    func testProcNotFoundIsUndetermined() {
-        // procNotFound — iTerm2 not running; TCC can't be determined without a target.
-        guard case .undetermined = AutomationGrant.state(forAEResult: -600) else {
-            return XCTFail("procNotFound should be undetermined, not a hard denied/granted")
-        }
+    func testProcNotFoundIsUndeterminedWithAppSpecificMessage() {
+        // procNotFound — the target app isn't running; TCC can't be determined without a
+        // target. The message must name THE app checked (a hardcoded "iTerm2 not
+        // running" would misreport for Ghostty).
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -600, appName: "iTerm2"),
+                       .undetermined("iTerm2 not running"))
+        XCTAssertEqual(AutomationGrant.state(forAEResult: -600, appName: "Ghostty"),
+                       .undetermined("Ghostty not running"))
     }
 
     func testUnknownStatusIsUndeterminedNeverGranted() {
         // Fail safe: an unrecognized status must never read as granted.
-        guard case .undetermined = AutomationGrant.state(forAEResult: -9999) else {
-            return XCTFail("unknown status should be undetermined")
+        for appName in ["iTerm2", "Ghostty"] {
+            guard case .undetermined = AutomationGrant.state(forAEResult: -9999,
+                                                             appName: appName) else {
+                return XCTFail("unknown status should be undetermined for \(appName)")
+            }
         }
     }
 
-    // MARK: describe — actionable, names the Settings pane when action is needed
+    // MARK: describe — actionable, names the app and the Settings pane when action is needed
 
-    func testDescribeDeniedNamesTheSettingsPane() {
-        let s = AutomationGrant.describe(.denied)
-        XCTAssertTrue(s.contains("Automation"), "denied must point at the Automation pane")
+    func testDescribeDeniedNamesTheAppAndSettingsPane() {
+        let iterm = AutomationGrant.describe(.denied, appName: "iTerm2")
+        XCTAssertTrue(iterm.contains("Automation"), "denied must point at the Automation pane")
+        XCTAssertTrue(iterm.contains("pesterm → iTerm2"), "denied must name the app row to enable")
+
+        let ghostty = AutomationGrant.describe(.denied, appName: "Ghostty")
+        XCTAssertTrue(ghostty.contains("Automation"))
+        XCTAssertTrue(ghostty.contains("pesterm → Ghostty"))
+    }
+
+    func testDescribeNeedsPromptNamesTheApp() {
+        let s = AutomationGrant.describe(.needsPrompt, appName: "Ghostty")
+        XCTAssertTrue(s.contains("Ghostty"), "needsPrompt must name the app's reveal context")
     }
 
     func testDescribeGrantedIsCalm() {
-        XCTAssertEqual(AutomationGrant.describe(.granted), "granted")
+        XCTAssertEqual(AutomationGrant.describe(.granted, appName: "iTerm2"), "granted")
+        XCTAssertEqual(AutomationGrant.describe(.granted, appName: "Ghostty"), "granted")
     }
 
-    // MARK: the by-tty miss diagnostic — blame the grant only when the grant is the problem
+    // MARK: statusLine — the pure seam behind `pesterm status`'s installed-app gating
 
-    func testMissDiagnosticWithGrantBlamesTheTab() {
-        let s = TmuxRevealer.byTtyMissDiagnostic(tty: "/dev/ttys003", grant: .granted)
-        XCTAssertTrue(s.contains("/dev/ttys003"))
-        XCTAssertFalse(s.contains("Automation"),
-                       "grant is fine — don't send the user to System Settings")
+    func testStatusLineNilWhenAppNotInstalled() {
+        XCTAssertNil(AutomationGrant.statusLine(appName: "Ghostty", installed: false,
+                                                state: .granted),
+                     "no Ghostty installed → no Ghostty noise in status")
     }
 
-    func testMissDiagnosticWithoutGrantBlamesTheGrant() {
-        for grant in [AutomationGrant.State.denied, .needsPrompt] {
-            let s = TmuxRevealer.byTtyMissDiagnostic(tty: "/dev/ttys003", grant: grant)
-            XCTAssertTrue(s.contains("Automation") || s.contains("automation"),
-                          "missing grant must be named — this failure was silent for weeks")
-        }
+    func testStatusLineNamesAppAndState() {
+        let line = AutomationGrant.statusLine(appName: "Ghostty", installed: true,
+                                              state: .granted)
+        XCTAssertEqual(line, "Ghostty automation (needed for the jump-to-tab reveal): granted")
     }
 }

@@ -1,14 +1,18 @@
 import Foundation
 
-/// Holds the known revealers and picks the first match. iTerm2 first. Adding a
-/// terminal = appending a type here + one new conformance.
+/// Holds the known revealers and picks the first match: tmux first (it must beat the
+/// stale ITERM_SESSION_ID every tmux pane inherits), then the mutually-exclusive
+/// iTerm2/Ghostty pair. Adding a terminal = appending a type here + one new conformance.
 enum RevealerRegistry {
     static let revealers: [TerminalRevealer.Type] = [
         // tmux FIRST: inside tmux, ITERM_SESSION_ID is present-but-stale, so the tmux
         // revealer must win detection (first-match-wins below). It returns nil when not in
-        // tmux, falling through to the iTerm revealer (non-tmux path unchanged).
+        // tmux, falling through to the terminal-app revealers (non-tmux path unchanged).
         TmuxRevealer.self,
-        ITerm2Revealer.self
+        // iTerm2 and Ghostty detection are mutually exclusive (TERM_PROGRAM is
+        // "iTerm.app" vs "ghostty"), so their relative order is cosmetic.
+        ITerm2Revealer.self,
+        GhosttyRevealer.self
     ]
 
     /// Returns the first revealer whose `detect` matches `env`, else nil.
