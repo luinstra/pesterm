@@ -25,6 +25,13 @@ final class AdapterRegistryTests: XCTestCase {
         XCTAssertNil(AdapterRegistry.adapter(for: "claude-x"))
     }
 
+    func testUnknownAdapterExitCodeIsZero() {
+        // Root invariant #3: every adapter exit is 0. On the PermissionRequest hook a
+        // non-zero exit is INTERPRETED by Claude (exit 2 = deny), so a typo'd --adapter
+        // in a hand-edited hook must fall back to the terminal prompt — never deny.
+        XCTAssertEqual(AdapterRegistry.unknownAdapterExitCode, 0)
+    }
+
     // MARK: group prefix derived from a single source-of-truth
 
     func testGroupPrefixDerivedFromSource() {

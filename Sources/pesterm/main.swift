@@ -139,9 +139,12 @@ private func timeoutArgument(in args: [String]) -> TimeInterval? {
 
 /// Adapter mode: look up the agent adapter for `--adapter <value>`, read ALL of stdin
 /// (readDataToEndOfFile — returns at EOF incl. empty; V4), and map it to an outcome.
-/// An UNKNOWN adapter exits 2; a suppression logs its diagnostic + exits 0 (C3); a post
-/// returns the request so the keep-alive/AppDelegate/backend machinery runs (heeding the
-/// GUARD NOTE above — the permission path needs `app.run()` to deliver and wait).
+/// An UNKNOWN adapter logs + exits 0 — NEVER non-zero: Claude interprets hook exit codes
+/// (PermissionRequest exit 2 = deny), so a typo'd --adapter must fall back to the terminal
+/// prompt, not deny every tool call (invariant #3). A suppression logs its diagnostic +
+/// exits 0 (C3); a post returns the request so the keep-alive/AppDelegate/backend
+/// machinery runs (heeding the GUARD NOTE above — the permission path needs `app.run()`
+/// to deliver and wait).
 ///
 /// Dispatch goes through `AdapterRegistry`, so adding an agent is a new `AgentAdapter`
 /// conformance + one registry line — this function never names a concrete adapter.
@@ -152,7 +155,7 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
     guard let adapterType = AdapterRegistry.adapter(for: adapter) else {
         FileHandle.standardError.write(
             Data("pesterm: unknown adapter '\(adapter)'\n".utf8))
-        exit(2)
+        exit(AdapterRegistry.unknownAdapterExitCode)
     }
 
     // Read stdin BEFORE NSApp.run() (PP1). readDataToEndOfFile returns at EOF.

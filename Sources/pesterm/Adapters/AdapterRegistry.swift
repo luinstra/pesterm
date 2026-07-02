@@ -10,8 +10,15 @@ enum AdapterRegistry {
         ClaudePermissionAdapter.self,  // "claude-permission" — PermissionRequest hook (.permission)
     ]
 
-    /// The adapter selected by an `--adapter` value, or nil if unknown (caller exits 2).
+    /// The adapter selected by an `--adapter` value, or nil if unknown (caller logs to
+    /// stderr and exits `unknownAdapterExitCode`).
     static func adapter(for value: String) -> AgentAdapter.Type? {
         return adapters.first { $0.adapterValue == value }
     }
+
+    /// Exit code for an unknown `--adapter` value: 0, per root invariant #3 (every adapter
+    /// exit is 0). Claude INTERPRETS non-zero hook exits — on PermissionRequest, exit 2
+    /// means DENY — so a typo'd --adapter in a hand-edited hook must degrade to the
+    /// terminal prompt (silence + exit 0), never silently deny every tool call.
+    static let unknownAdapterExitCode: Int32 = 0
 }

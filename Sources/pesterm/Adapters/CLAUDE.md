@@ -14,7 +14,8 @@ Two inbound hook shapes, dispatched by `--adapter`:
   Renders the tool's real action and posts a `.permission` notification with Approve/Deny.
 
 Both adapters conform to **`AgentAdapter`**; `AdapterRegistry.adapter(for:)` looks one up by
-its `--adapter` value (unknown → caller exits `2`). Each adapter's `outcome(stdin:…)` returns
+its `--adapter` value (unknown → stderr + exit `0`, per invariant #3 — Claude interprets
+non-zero hook exits, and on PermissionRequest exit 2 means DENY). Each adapter's `outcome(stdin:…)` returns
 `.post(request)` or `.suppress(reason)` — purely; main.swift owns the stderr write + exit.
 Outbound, `PermissionDecision.outputJSON(for:)` produces the decision Claude reads from stdout.
 
