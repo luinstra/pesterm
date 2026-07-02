@@ -212,13 +212,17 @@ timeout/error/crash -> emit NOTHING (Claude falls back to its terminal prompt)
 Deny is JSON `behavior:"deny"` with **exit 0** — NOT exit 2. EVERY outcome exits 0.
 There is no `updatedInput`, no `always` ("don't ask again" is not in v1).
 
-### Body click = REVEAL, not resolve
+### Body click = REVEAL, then prompt falls back to the terminal
 
 A body click on the PERMISSION notification REVEALS the iTerm2 tab (via the EXISTING
-revealer) so you can read the full context in the terminal, then **RETURNS without
-resolving** — the run loop stays alive (still blocking) so you can come back and tap
-Approve/Deny, or let it time out. This is the key behavioral difference from the INFO
-notification, which exits after reveal. Gated by `NotificationRequest.kind == .permission`.
+revealer) so you can read the full context in the terminal, and **does not itself
+resolve** — only Approve/Deny map to a decision. But macOS CONSUMES the notification on
+a body click (the card leaves Notification Center), so there is nothing left to tap:
+the dismissal detector notices the card is gone, re-checks the decision store through
+the grace window, and then finalizes as the terminal fallback (emit nothing, exit 0).
+Net behavior: **body click = reveal, then answer in the terminal a few seconds later.**
+This differs from the INFO notification only in the exit path (info exits immediately
+after reveal). Gated by `NotificationRequest.kind == .permission`.
 
 ### Mechanism
 

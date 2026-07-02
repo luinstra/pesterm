@@ -67,8 +67,11 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
     /// Dismissal-detection state (both kinds). `sawDelivered` latches true once our
     /// notification is observed in the delivered list, so the startup race (delivery is
     /// async; absent for the first instant) doesn't trigger a spurious immediate exit.
+    /// `dismissGraceElapsed` latches once the card-gone grace window has been armed, so
+    /// the second `handleDismissed` pass finalizes instead of re-arming forever.
     private var dismissPollTimer: Timer?
     private var sawDelivered = false
+    private var dismissGraceElapsed = false
 
     func post(_ request: NotificationRequest,
               onActivate: @escaping (String?, [String: String]?) -> Void) throws {
@@ -150,7 +153,9 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         let approve = UNNotificationAction(
             identifier: PermissionFlow.approveActionIdentifier,
             title: "Approve",
-            options: []
+            // Approving grants a tool call — require an unlocked session. Deny stays
+            // friction-free (denying is always safe).
+            options: [.authenticationRequired]
         )
         let deny = UNNotificationAction(
             identifier: PermissionFlow.denyActionIdentifier,
@@ -275,8 +280,13 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         self.dismissPollTimer = timer
     }
 
-    /// The notification was dismissed/cleared. INFO: just exit. PERMISSION: treat as the
-    /// terminal fallback — emit NOTHING + exit 0 (gate-guarded), exactly like the fail-safe.
+    /// The notification was dismissed/cleared. INFO: just exit. PERMISSION: the card being
+    /// gone does NOT yet mean "dismissed" — an Approve/Deny tap ALSO removes the card, and
+    /// when the tap lands on a freshly relaunched responder its `DecisionStore` write can
+    /// trail the disappearance by a second or more. So: check the store synchronously,
+    /// then hold a short grace window (decision poll still running) before finalizing as
+    /// a real dismissal — terminal fallback, emit NOTHING + exit 0 (gate-guarded), exactly
+    /// like the fail-safe.
     private func handleDismissed() {
         switch requestKind {
         case .info:
@@ -285,14 +295,34 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
             dismissPollTimer?.invalidate()
             exit(0)
         case .permission:
-            guard gate.tryResolve() else { return }
-            Trace.log("DISMISSED kind=permission")
-            failSafeTimer?.invalidate()
-            pollTimer?.invalidate()
-            dismissPollTimer?.invalidate()
-            removePermissionNotification()
-            fflush(stdout)
-            exit(0)
+            let taken = deliveredIdentifier.flatMap { DecisionStore.take(id: $0) }
+            switch PermissionFlow.dismissalAction(storeDecision: taken,
+                                                  graceElapsed: dismissGraceElapsed) {
+            case .resolve(let decision):
+                // Not a dismissal after all — the tap's decision was already in flight.
+                Trace.log("DISMISS_TOOK decision=\(decision)")
+                resolvePermission(with: decision)
+            case .startGrace:
+                // Card gone, no decision yet. Stop watching the delivered list (the card
+                // won't come back) and give a late store write one grace window to land;
+                // the 0.25s decision poll keeps racing us and may resolve first (gate).
+                Trace.log("DISMISS_GRACE seconds=\(PermissionFlow.dismissGraceSeconds)")
+                dismissGraceElapsed = true
+                dismissPollTimer?.invalidate()
+                Timer.scheduledTimer(withTimeInterval: PermissionFlow.dismissGraceSeconds,
+                                     repeats: false) { [weak self] _ in
+                    self?.handleDismissed()
+                }
+            case .finalizeDismissed:
+                guard gate.tryResolve() else { return }
+                Trace.log("DISMISSED kind=permission")
+                failSafeTimer?.invalidate()
+                pollTimer?.invalidate()
+                dismissPollTimer?.invalidate()
+                removePermissionNotification()
+                fflush(stdout)
+                exit(0)
+            }
         }
     }
 
@@ -342,30 +372,23 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         completionHandler([.banner, .sound])
     }
 
-    /// Interaction handling, branched on kind.
-    /// - INFO: in-process reveal, then exit (unchanged reveal-then-exit path).
-    /// - PERMISSION: routed through `PermissionFlow.route` because the OS may deliver this
-    ///   tap to the wrong process. Our own Approve/Deny resolves; a tap for ANOTHER
-    ///   process's notification is handed off via `DecisionStore`; our own body click
-    ///   reveals; a foreign body click is ignored.
+    /// Interaction handling — KIND-AGNOSTIC routing. macOS delivers each tap to ONE
+    /// delegate per bundle id, so ANY live pesterm process (info or permission) can receive
+    /// a response meant for another process's notification. Every response is classified by
+    /// `PermissionFlow.route` and acted on per `PermissionFlow.responseAction`; only the
+    /// OWN paths differ by kind (info reveals-then-exits, permission keeps waiting). A
+    /// foreign decision is ALWAYS handed off via `DecisionStore` — an info process
+    /// swallowing another process's Approve loses the approval.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        capTimer?.invalidate()
-
-        if requestKind == .info {
-            onActivate?(response.actionIdentifier, Self.revealUserInfo(from: response))
-            completionHandler()
-            exit(0)
-        }
-
-        // PERMISSION.
         let responseId = response.notification.request.identifier
-        Trace.log("DIDRECEIVE responseId=\(responseId) myId=\(deliveredIdentifier ?? "nil") action=\(response.actionIdentifier)")
-        switch PermissionFlow.route(responseId: responseId, myId: deliveredIdentifier,
-                                    actionId: response.actionIdentifier) {
+        Trace.log("DIDRECEIVE responseId=\(responseId) myId=\(deliveredIdentifier ?? "nil") kind=\(requestKind) action=\(response.actionIdentifier)")
+        let routing = PermissionFlow.route(responseId: responseId, myId: deliveredIdentifier,
+                                           actionId: response.actionIdentifier)
+        switch PermissionFlow.responseAction(kind: requestKind, routing: routing) {
         case .resolveOwn(let decision):
             // Our notification, our decision — resolve + exit (completion runs first).
             Trace.log("ROUTE=resolveOwn decision=\(decision)")
@@ -374,21 +397,46 @@ final class UNUserNotificationBackend: NSObject, NotificationBackend, UNUserNoti
         case .recordForOther(let id, let decision):
             // Misrouted: this tap is for another process's notification. Hand the decision
             // off via the store keyed by THAT id; do NOT resolve ours, do NOT exit — our own
-            // tap/poll/fail-safe still has to land.
+            // tap/poll/fail-safe/cap still has to land.
             Trace.log("ROUTE=recordForOther id=\(id) decision=\(decision)")
             DecisionStore.write(decision, forId: id)
             completionHandler()
 
-        case .revealOwn:
-            // Body/default click on OUR notification: reveal, keep waiting (no resolve).
-            Trace.log("ROUTE=revealOwn")
+        case .revealOwnThenExit:
+            // Info's click: reveal, then exit (the classic reveal-then-exit path).
+            Trace.log("ROUTE=revealOwnThenExit")
+            capTimer?.invalidate()
+            onActivate?(response.actionIdentifier, Self.revealUserInfo(from: response))
+            completionHandler()
+            exit(0)
+
+        case .revealOwnKeepWaiting:
+            // Body/default click on OUR permission notification: reveal, keep waiting.
+            Trace.log("ROUTE=revealOwnKeepWaiting")
             onActivate?(response.actionIdentifier, Self.revealUserInfo(from: response))
             completionHandler()
 
-        case .ignoreForeignBodyClick:
-            // Body click for someone else's notification — don't reveal the wrong terminal.
-            Trace.log("ROUTE=ignoreForeignBodyClick")
+        case .revealForeign:
+            // Body click for someone else's notification. The owner will never see this
+            // tap — reveal on its behalf, from the CLICKED notification's userInfo only
+            // (never our env fallback: that would front the WRONG terminal). Keep waiting.
+            Trace.log("ROUTE=revealForeign")
+            revealForeign(Self.revealUserInfo(from: response))
             completionHandler()
+        }
+    }
+
+    /// Reveal a FOREIGN notification's target from its userInfo handoff. No env fallback —
+    /// absent/unparseable target means do nothing rather than reveal our own terminal.
+    private func revealForeign(_ userInfo: [String: String]?) {
+        guard let info = userInfo, let target = RevealerRegistry.revealer(from: info) else {
+            return
+        }
+        do {
+            try target.reveal()
+        } catch {
+            FileHandle.standardError.write(
+                Data("pesterm: reveal failed: \(error)\n".utf8))
         }
     }
 }

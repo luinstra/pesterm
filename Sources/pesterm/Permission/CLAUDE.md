@@ -13,11 +13,14 @@ keeps the AppKit run loop alive while you decide. The lifecycle:
 ```
 post() ─ arm 120s fail-safe FIRST ─ requestAuthorization ─ schedule notification
                                                                     │
-   ┌──────────────────────── exactly one wins (ResolvedGate) ───────┼─────────────┐
-   ▼                                                                 ▼             ▼
-Approve/Deny tap                                          body/default click   120s fail-safe
- → write decision JSON                                     → REVEAL tab,        → emit NOTHING
- → fflush + exit 0                                           keep waiting        → exit 0 (fallback)
+   ┌───────────────── exactly one wins (ResolvedGate) ──────────────┼──────────────────────┐
+   ▼                        ▼                          ▼                                    ▼
+Approve/Deny tap      body/default click       card gone (dismissed or consumed      120s fail-safe
+ → write decision      → REVEAL tab; the       by a click)                            → emit NOTHING
+   JSON                  click CONSUMES         → take DecisionStore; found?          → exit 0
+ → fflush + exit 0       the card, so the         resolve it (it was a tap in           (fallback)
+                         card-gone path           flight) — else 3s grace, re-check,
+                         finalizes shortly        then emit NOTHING + exit 0 (fallback)
 ```
 
 The pure helpers live here; the delegate methods that call them live in
@@ -27,9 +30,12 @@ The pure helpers live here; the delegate methods that call them live in
 
 ```
 Permission/
-├── PermissionFlow.swift   # constants + pure action-id → decision mapping; timeoutSeconds = 120
+├── PermissionFlow.swift   # constants + pure routing: action-id → decision, tap routing by kind,
+│                          # dismissal-grace decisions; timeoutSeconds = 120
+├── DecisionStore.swift    # cross-process decision handoff (atomic file per notification id)
 ├── ResolvedGate.swift     # one-shot NSLock finalizer: tryResolve() returns true to exactly one caller
-└── GrantStatus.swift      # pure-CLI reader for the notifications grant (status/configure)
+├── GrantStatus.swift      # pure-CLI reader for the notifications grant (status/configure)
+└── Trace.swift            # opt-in diagnostic logging for the tap-routing investigation
 ```
 
 ## Key Patterns
@@ -49,13 +55,25 @@ unanswered first-run authorization dialog still falls back instead of hanging fo
 an auto-allow. 120s must stay well under Claude's ~600s hook timeout so pesterm wins the
 race and Claude gets a clean fallback rather than its own timeout.
 
-### Body click = REVEAL, not resolve
+### Body click = REVEAL, then terminal fallback (the card is consumed)
 
-Tapping the notification *body* (the default action) reveals the iTerm2 tab and **returns
-without resolving** — the run loop keeps waiting, the fail-safe keeps running. Only the
-Approve/Deny action buttons map to a decision (`PermissionFlow.decision(forActionIdentifier:)`
-returns nil for the body/unknown). `AppDelegate` double-guards so an action tap never also
-reveals.
+Tapping the notification *body* (the default action) reveals the iTerm2 tab and **does not
+itself resolve** — only the Approve/Deny action buttons map to a decision
+(`PermissionFlow.decision(forActionIdentifier:)` returns nil for the body/unknown).
+But macOS removes the card from Notification Center on a body click, so there is nothing
+left to tap: the card-gone detector re-checks the `DecisionStore` through the grace window
+and then finalizes as the terminal fallback. **Net effect: body click = reveal, then answer
+in the terminal a few seconds later** — there is no long "come back and tap Approve" state.
+`AppDelegate` double-guards so an action tap never also reveals.
+
+### Card gone ≠ dismissed (the grace window)
+
+An Approve/Deny tap ALSO removes the card — and when the tap lands on a freshly relaunched
+responder process, its `DecisionStore` write can trail the card's disappearance by a second
+or more. So `handleDismissed` never finalizes on first sight: it `take`s the store
+synchronously, and if empty waits `PermissionFlow.dismissGraceSeconds` (the 0.25s decision
+poll still racing) before the gate-guarded fallback exit. Finalizing immediately on "card
+absent" eats in-flight approvals — that was a real bug, don't reintroduce it.
 
 ### Every path exits 0
 

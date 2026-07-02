@@ -55,4 +55,12 @@ final class UNUserNotificationBackendTests: XCTestCase {
         XCTAssertEqual(cat.actions[1].identifier, "pesterm.deny")
         XCTAssertEqual(cat.actions[1].title, "Deny")
     }
+
+    // Approve requires an unlocked device/session — a tap from a locked screen must not
+    // grant a tool call. Deny stays friction-free (denying is always safe).
+    func testApproveRequiresAuthentication() {
+        let cat = UNUserNotificationBackend.permissionCategory()
+        XCTAssertTrue(cat.actions[0].options.contains(.authenticationRequired))
+        XCTAssertFalse(cat.actions[1].options.contains(.authenticationRequired))
+    }
 }

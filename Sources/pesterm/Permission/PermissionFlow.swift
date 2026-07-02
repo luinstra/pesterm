@@ -64,9 +64,11 @@ enum PermissionFlow {
         case recordForOther(id: String, PermissionDecision)
         /// A body/default click on OUR notification → reveal the terminal, keep waiting.
         case revealOwn
-        /// A body/default click for another process's notification → ignore (don't reveal
-        /// the wrong terminal; that owner isn't waiting on a body click anyway).
-        case ignoreForeignBodyClick
+        /// A body/default click for another process's notification → reveal THAT
+        /// notification's target (from the response's userInfo — never our own env
+        /// fallback). The OS delivered the tap HERE; the owner will never see it, and for
+        /// an info notification reveal-on-click is its entire purpose.
+        case revealForeign
     }
 
     /// PURE: classify a received response from `responseId` (the tapped notification's id),
@@ -77,6 +79,62 @@ enum PermissionFlow {
                                       : .recordForOther(id: responseId, decision)
         }
         // No decision → body / default / unknown action.
-        return responseId == myId ? .revealOwn : .ignoreForeignBodyClick
+        return responseId == myId ? .revealOwn : .revealForeign
+    }
+
+    /// What the receiving process DOES with a routed tap, by its own request kind.
+    /// Foreign traffic (recordForOther / revealForeign) is handled identically for both
+    /// kinds — an info process must never swallow another process's Approve just because
+    /// the tap wasn't for it. Only the OWN cases differ: info reveals-then-exits,
+    /// permission keeps its run loop waiting for a decision.
+    enum ResponseAction: Equatable {
+        case resolveOwn(PermissionDecision)
+        case recordForOther(id: String, PermissionDecision)
+        /// Info's reveal-then-exit path (also the defensive mapping for the unreachable
+        /// info+resolveOwn combination — info notifications carry no Approve/Deny).
+        case revealOwnThenExit
+        case revealOwnKeepWaiting
+        case revealForeign
+    }
+
+    /// PURE: map (this process's kind, tap routing) → the backend's action.
+    static func responseAction(kind: NotificationKind, routing: TapRouting) -> ResponseAction {
+        switch routing {
+        case .resolveOwn(let decision):
+            return kind == .permission ? .resolveOwn(decision) : .revealOwnThenExit
+        case .recordForOther(let id, let decision):
+            return .recordForOther(id: id, decision)
+        case .revealOwn:
+            return kind == .permission ? .revealOwnKeepWaiting : .revealOwnThenExit
+        case .revealForeign:
+            return .revealForeign
+        }
+    }
+
+    /// Grace window between "our card vanished from the delivered list" and finalizing as
+    /// a dismissal. A tap can be handled by a freshly RELAUNCHED responder process (the
+    /// original delegate died) — cold start means the card disappears the instant the user
+    /// taps, but the DecisionStore write can trail by a second or more. Finalizing
+    /// immediately would eat that Approve. Long enough for the relaunch to land; short
+    /// enough that a real dismissal still reaches the terminal fallback promptly.
+    static let dismissGraceSeconds: TimeInterval = 3
+
+    /// The outcome of the "card vanished" observation for a permission wait.
+    enum DismissalAction: Equatable {
+        /// A decision was already in the store → honor it (it was a tap, not a dismissal).
+        case resolve(PermissionDecision)
+        /// No decision yet, grace not yet run → wait `dismissGraceSeconds`, then re-check.
+        case startGrace
+        /// No decision even after the grace window → a genuine dismissal; terminal fallback.
+        case finalizeDismissed
+    }
+
+    /// PURE: decide what a permission process does when its delivered card is gone.
+    /// `storeDecision` is the result of a synchronous `DecisionStore.take` performed at
+    /// observation time; `graceElapsed` is whether the grace window already ran.
+    static func dismissalAction(storeDecision: PermissionDecision?,
+                                graceElapsed: Bool) -> DismissalAction {
+        if let decision = storeDecision { return .resolve(decision) }
+        return graceElapsed ? .finalizeDismissed : .startGrace
     }
 }
