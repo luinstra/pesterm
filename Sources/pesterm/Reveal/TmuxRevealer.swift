@@ -87,7 +87,13 @@ final class TmuxRevealer: TerminalRevealer {
                     warn("tmux snap to pane \(pane) failed (pane may have closed); revealed tab only")
                 }
             } else {
-                warn("no iTerm tab for tmux client tty \(tty); revealed app only")
+                // A missing Automation grant makes the traversal see ZERO windows — the
+                // most common cause of this miss under tmux, and invisible without the
+                // check (the symptom reads as "no matching tab"). Blame the grant only
+                // when the grant is actually the problem.
+                let grant = AutomationGrant.checkITerm()
+                Trace.log("TMUX_REVEAL byTtyMiss grant=\(grant)")
+                warn(Self.byTtyMissDiagnostic(tty: tty, grant: grant))
             }
         case .detached:
             warn("no attached tmux client for pane \(pane) (detached?); revealed app only")
@@ -95,6 +101,20 @@ final class TmuxRevealer: TerminalRevealer {
             warn("multiple tmux clients for pane \(pane); revealed app only")
         case nil:
             warn("tmux query failed for pane \(pane); revealed app only")
+        }
+    }
+
+    /// PURE: the diagnostic for "attached client tty found, but no iTerm session matched".
+    /// With the grant in place that genuinely means no matching tab; without it the
+    /// message must name the Automation grant — this exact failure was silent and
+    /// misattributed before (iTerm fronts, no tab switch, no hint why).
+    static func byTtyMissDiagnostic(tty: String, grant: AutomationGrant.State) -> String {
+        switch grant {
+        case .granted:
+            return "no iTerm tab for tmux client tty \(tty); revealed app only"
+        default:
+            return "tmux reveal blocked — iTerm automation \(AutomationGrant.describe(grant)); "
+                 + "revealed app only"
         }
     }
 

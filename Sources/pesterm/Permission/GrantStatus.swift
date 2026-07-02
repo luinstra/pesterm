@@ -25,9 +25,10 @@ enum GrantState: String {
 /// grant as `.unknown`. If `status`/`configure` ever start reporting `.unknown` spuriously,
 /// this is the first place to look.
 ///
-/// (pesterm needs no Automation/TCC grant for the reveal: it drives iTerm from an
-/// iTerm-descendant process — self-automation — so macOS requires no grant, and prompts
-/// on its own in the rare case one is ever needed.)
+/// (OUTSIDE tmux pesterm needs no Automation/TCC grant for the reveal: it drives iTerm
+/// from an iTerm-descendant process — self-automation. INSIDE tmux the hook runs under
+/// the tmux server daemon, that relationship is severed, and the reveal needs the iTerm
+/// Automation grant — see `AutomationGrant`, surfaced by `status`/`configure`.)
 enum GrantStatus {
 
     /// Notification authorization status, bridged to synchronous via a semaphore so it

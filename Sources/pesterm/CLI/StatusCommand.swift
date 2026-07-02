@@ -100,10 +100,14 @@ struct StatusCommand: ParsableCommand {
             }
         }
 
-        // Manual-grant reminder. Notifications is the only grant pesterm needs; macOS
-        // prompts for it on the first post. (The reveal needs no Automation grant.)
+        // Manual-grant reminders. Notifications: macOS prompts on the first post. iTerm
+        // Automation: needed ONLY for the tmux jump-to-tab reveal — outside tmux the
+        // reveal is self-automation (pesterm is an iTerm descendant) and needs no grant.
+        // The check never triggers the consent prompt (askUserIfNeeded=false).
         print("")
         print("Manual grant (one-time): allow notifications when macOS prompts on the first post.")
+        print("iTerm automation (needed for the tmux reveal only): "
+              + AutomationGrant.describe(AutomationGrant.checkITerm()))
 
         Foundation.exit(0)
     }
