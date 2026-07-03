@@ -5,12 +5,20 @@ import Foundation
 /// `TmuxClient` subprocess shell delegates every decision to these functions).
 enum TmuxEnv {
 
+    /// An attached (non-control) tmux client: its tty (the iTerm by-tty match key) and
+    /// its pid (the ancestry key for identifying which terminal APP hosts it — nil when
+    /// tmux reported something unparseable; the client still counts for one-vs-many).
+    struct Client: Equatable {
+        let tty: String
+        let pid: Int32?
+    }
+
     /// The outcome of inspecting the attached tmux clients for a pane's session.
     /// (Named `detached`/`multiple` rather than `none`/`many` so a `ClientChoice?` switch
     /// can't confuse the `detached` case with `Optional.none` = a tmux query failure.)
     enum ClientChoice: Equatable {
-        /// Exactly one non-control client is attached — reveal its tty.
-        case one(String)
+        /// Exactly one non-control client is attached — reveal it.
+        case one(Client)
         /// No (non-control) client attached — detached → fall back.
         case detached
         /// More than one client — ambiguous → fall back (decision: don't guess).
@@ -34,36 +42,60 @@ enum TmuxEnv {
         return (socket, pane)
     }
 
-    /// Parse `tmux list-clients -F '#{client_tty}:#{client_control_mode}'` output into the
-    /// non-control client ttys. The control-mode flag is the LAST colon field (a tty path
-    /// `/dev/ttys003` has none of its own); control-mode rows (`:1`) are dropped so an
-    /// IDE/control client never becomes the reveal target.
-    static func parseClientTTYs(listClientsOutput: String) -> [String] {
-        var ttys: [String] = []
+    /// Parse `tmux list-clients -F '#{client_tty}:#{client_pid}:#{client_control_mode}'`
+    /// output into the non-control clients. Fields parse from the RIGHT (a tty path
+    /// `/dev/ttys003` carries no colons of its own): last = control-mode flag, second-last
+    /// = pid, remainder = tty. Control-mode rows (`:1`) are dropped so an IDE/control
+    /// client never becomes the reveal target. A garbage/missing pid degrades to
+    /// `pid: nil` — the client still exists (one-vs-many must not change), it just can't
+    /// be ancestry-classified.
+    static func parseClients(listClientsOutput: String) -> [Client] {
+        var clients: [Client] = []
         for rawLine in listClientsOutput.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(rawLine).trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
             guard let lastColon = line.range(of: ":", options: .backwards) else {
                 // No control-mode field — treat the whole line as a tty (defensive).
                 let n = normalizeTTY(line)
-                if !n.isEmpty { ttys.append(n) }
+                if !n.isEmpty { clients.append(Client(tty: n, pid: nil)) }
                 continue
             }
             let control = String(line[lastColon.upperBound...])
             if control == "1" { continue } // skip control-mode clients
-            let n = normalizeTTY(String(line[..<lastColon.lowerBound]))
-            if !n.isEmpty { ttys.append(n) }
+            let beforeControl = String(line[..<lastColon.lowerBound])
+
+            let pid: Int32?
+            let tty: String
+            if let pidColon = beforeControl.range(of: ":", options: .backwards) {
+                pid = Int32(beforeControl[pidColon.upperBound...])
+                tty = normalizeTTY(String(beforeControl[..<pidColon.lowerBound]))
+            } else {
+                // Two-field line (old format) — tty only, no pid (defensive).
+                pid = nil
+                tty = normalizeTTY(beforeControl)
+            }
+            if !tty.isEmpty { clients.append(Client(tty: tty, pid: pid)) }
         }
-        return ttys
+        return clients
     }
 
     /// Decision rule (lean + don't-guess): one → reveal it; zero → detached; >1 → multiple.
-    static func chooseClientTTY(_ ttys: [String]) -> ClientChoice {
-        switch ttys.count {
+    static func chooseClient(_ clients: [Client]) -> ClientChoice {
+        switch clients.count {
         case 0: return .detached
-        case 1: return .one(ttys[0])
+        case 1: return .one(clients[0])
         default: return .multiple
         }
+    }
+
+    /// PURE: among MULTIPLE attached clients, keep only the locally-hosted ones — a
+    /// mosh/ssh-hosted client cannot be revealed by a local app, so dropping it is
+    /// logic, not preference (the recurring real-world case: a forgotten remote attach
+    /// sharing the session with the real terminal tab). Exactly one local survivor →
+    /// `.one` (full precision proceeds); two+ locals → `.multiple` (genuine ambiguity,
+    /// never guess); zero locals → `.detached` (nothing local to reveal).
+    static func chooseLocalClient(_ classified: [(client: Client, locallyHosted: Bool)]) -> ClientChoice {
+        return chooseClient(classified.filter { $0.locallyHosted }.map { $0.client })
     }
 
     /// Trim surrounding whitespace/newlines (the `-F` output carries a trailing newline,

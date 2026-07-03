@@ -78,9 +78,17 @@ zero or several → Ghostty is fronted app-only and stderr says why.
 - **Two tabs in the same directory** are ambiguous by design: the click fronts the app
   only, and their notifications share one coalescing card. Separate directories (e.g.
   git worktrees) avoid both.
-- **tmux inside Ghostty is not supported**: notifications post, but the click performs
-  no jump-to-tab (the tmux reveal is iTerm-only, and pesterm never fronts an app it
-  can't verify — with the tmux client attached from Ghostty, the click fronts nothing).
+- **tmux inside Ghostty: right app + right pane, not the exact tab.** The click fronts
+  Ghostty (identified from the tmux client's process ancestry — evidence, not a guess)
+  and snaps the pane inside tmux, which the attached Ghostty tab displays. Selecting
+  the exact Ghostty tab hosting the client needs a Ghostty tty property (upstream
+  ghostty#11592). If the client's host can't be identified, the click fronts nothing.
+- **Remote tmux attaches (mosh/ssh) are ignored by the reveal** — they can't be
+  revealed locally, so a forgotten mosh attach sharing your session no longer blocks
+  the click (the local client proceeds with full precision). A session attached ONLY
+  remotely fronts nothing, and a session with two+ LOCAL displays still fronts nothing
+  (pesterm never picks between real displays). Diagnose either with
+  `tmux list-clients`; prune with `tmux detach-client -t /dev/ttysNNN`.
 
 ## Claude Code hook wiring (done for you by `configure`)
 

@@ -75,14 +75,43 @@ final class TmuxRevealer: TerminalRevealer {
         }
         Trace.log("TMUX_REVEAL launcher=\(launcher.exe) prefix=\(launcher.prefixArgs)")
 
-        let choice = TmuxClient.attachedClientTTY(launcher: launcher, socket: socket, pane: pane)
-        Trace.log("TMUX_REVEAL clientChoice=\(String(describing: choice))")
+        guard let clients = TmuxClient.attachedClients(launcher: launcher, socket: socket,
+                                                       pane: pane) else {
+            warn(Self.failureDiagnostic(.queryFailed, pane: pane))
+            return
+        }
+        var choice = TmuxEnv.chooseClient(clients)
+        Trace.log("TMUX_REVEAL clientChoice=\(String(describing: choice)) of \(clients.count)")
+
+        if case .multiple = choice {
+            // Remote-attach filter: a mosh/ssh-hosted client (or one in an unsupported
+            // terminal) cannot be revealed locally — dropping it is logic, not
+            // preference. The recurring real-world case: a forgotten mosh attach
+            // sharing the session with the real terminal tab.
+            let classified: [(client: TmuxEnv.Client, locallyHosted: Bool)] = clients.map { c in
+                let hosted = c.pid.map {
+                    TerminalHost.classify(
+                        executablePaths: ProcessAncestry.executablePaths(startingAt: $0)) != nil
+                } ?? false
+                return (c, hosted)
+            }
+            choice = TmuxEnv.chooseLocalClient(classified)
+            Trace.log("TMUX_REVEAL localFilter \(clients.count) -> \(String(describing: choice))")
+            if case .detached = choice {
+                // Clients exist, none locally revealable — a distinct story from a
+                // genuinely detached session; name the invisible culprit.
+                warn(Self.failureDiagnostic(.remoteOnly, pane: pane))
+                return
+            }
+        }
+
         switch choice {
-        case .one(let tty):
-            let found = pesterm_reveal_iterm_session_by_tty(tty, ITerm2Revealer.iTermBundleID)
-            Trace.log("TMUX_REVEAL byTty tty=\(tty) found=\(found)")
+        case .one(let client):
+            let found = pesterm_reveal_iterm_session_by_tty(client.tty, ITerm2Revealer.iTermBundleID)
+            Trace.log("TMUX_REVEAL byTty tty=\(client.tty) found=\(found)")
             if found {
-                // The client provably lives in an iTerm session — fronting is justified.
+                // The client provably lives in an iTerm session — fronting is justified,
+                // and the exact tab is selected (the full-precision tier).
                 AppFront.bringToFront(bundleID: ITerm2Revealer.iTermBundleID)
                 Trace.log("TMUX_REVEAL fronted iTerm socket=\(socket) pane=\(pane)")
                 let snapped = TmuxClient.selectPane(launcher: launcher, socket: socket, pane: pane)
@@ -90,21 +119,34 @@ final class TmuxRevealer: TerminalRevealer {
                 if !snapped {
                     warn("tmux snap to pane \(pane) failed (pane may have closed); revealed tab only")
                 }
+            } else if let pid = client.pid,
+                      let host = TerminalHost.classify(
+                          executablePaths: ProcessAncestry.executablePaths(startingAt: pid)) {
+                // Tier 2: no iTerm session owns that tty, but the client's process
+                // ancestry names its host app — still EVIDENCE, not a guess. Front the
+                // host and snap the pane inside tmux (the attached client displays it).
+                // Exact-tab selection within the host stays iTerm-only until other
+                // terminals expose a tty (ghostty#11592).
+                AppFront.bringToFront(bundleID: host.bundleID)
+                let snapped = TmuxClient.selectPane(launcher: launcher, socket: socket, pane: pane)
+                Trace.log("TMUX_REVEAL frontedHost app=\(host.appName) pid=\(pid) selectPane=\(snapped)")
+                let iTermGrant = host.bundleID == ITerm2Revealer.iTermBundleID
+                    ? AutomationGrant.checkITerm() : nil
+                warn(Self.hostedFrontDiagnostic(appName: host.appName, pane: pane,
+                                                iTermGrant: iTermGrant))
             } else {
-                // A missing Automation grant makes the traversal see ZERO windows — the
-                // most common cause of this miss under tmux, and invisible without the
-                // check (the symptom reads as "no matching tab"). Blame the grant only
-                // when the grant is actually the problem.
+                // No tty match AND no classifiable host — front nothing (never guess).
+                // A missing Automation grant makes the iTerm traversal see ZERO windows —
+                // the most common cause of this miss under tmux-in-iTerm, and invisible
+                // without the check. Blame the grant only when it is the problem.
                 let grant = AutomationGrant.checkITerm()
-                Trace.log("TMUX_REVEAL byTtyMiss grant=\(grant)")
-                warn(Self.failureDiagnostic(.byTtyMiss(tty: tty, grant: grant), pane: pane))
+                Trace.log("TMUX_REVEAL byTtyMiss grant=\(grant) pid=\(client.pid.map(String.init) ?? "nil")")
+                warn(Self.failureDiagnostic(.byTtyMiss(tty: client.tty, grant: grant), pane: pane))
             }
         case .detached:
             warn(Self.failureDiagnostic(.detached, pane: pane))
         case .multiple:
             warn(Self.failureDiagnostic(.multiple, pane: pane))
-        case nil:
-            warn(Self.failureDiagnostic(.queryFailed, pane: pane))
         }
     }
 
@@ -113,10 +155,31 @@ final class TmuxRevealer: TerminalRevealer {
     enum RevealFailure: Equatable {
         case tmuxNotFound
         case detached
+        /// Two+ LOCALLY-HOSTED clients remain after the remote-attach filter —
+        /// genuine ambiguity between real displays.
         case multiple
+        /// Clients are attached, but none is hosted by a local terminal app pesterm
+        /// can reveal (mosh/ssh attaches, unsupported terminals).
+        case remoteOnly
         case queryFailed
         /// Attached client tty found, but no iTerm session matched it.
         case byTtyMiss(tty: String, grant: AutomationGrant.State)
+    }
+
+    /// PURE: the tier-2 hosted-front diagnostic — the tty didn't match an iTerm session
+    /// but ancestry identified the client's host app, which was fronted and the pane
+    /// snapped. Truthful about the precision ceiling (exact-tab under tmux is iTerm-only
+    /// until other terminals expose a tty). When the host IS iTerm yet the tty match
+    /// missed, the Automation grant is the prime suspect — name it (same silent-failure
+    /// trap as ever).
+    static func hostedFrontDiagnostic(appName: String, pane: String,
+                                      iTermGrant: AutomationGrant.State?) -> String {
+        var msg = "fronted \(appName) (the tmux client's host app) and snapped pane \(pane)"
+                + " — exact-tab selection under tmux is iTerm-only"
+        if let grant = iTermGrant, grant != .granted {
+            msg += "; iTerm automation " + AutomationGrant.describe(grant, appName: "iTerm2")
+        }
+        return msg
     }
 
     /// PURE: one diagnostic per failure branch. All end in "no reveal performed" — since
@@ -133,7 +196,10 @@ final class TmuxRevealer: TerminalRevealer {
             return "no attached tmux client for pane \(pane) (detached? note tmux reveal "
                  + "is iTerm-only); no reveal performed"
         case .multiple:
-            return "multiple tmux clients for pane \(pane); no reveal performed"
+            return "multiple locally-hosted tmux clients for pane \(pane); no reveal performed"
+        case .remoteOnly:
+            return "attached tmux clients for pane \(pane) are all remote or unsupported "
+                 + "(a mosh/ssh attach can't be revealed locally); no reveal performed"
         case .queryFailed:
             return "tmux query failed for pane \(pane); no reveal performed"
         case .byTtyMiss(let tty, let grant):

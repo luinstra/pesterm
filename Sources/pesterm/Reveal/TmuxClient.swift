@@ -41,20 +41,24 @@ enum TmuxClient {
         return nil
     }
 
-    /// The attached-client outcome for `pane`'s session. `list-clients -t <pane>` filters to
-    /// the session containing the pane; its `#{client_tty}:#{client_control_mode}` rows are
-    /// parsed by the pure `TmuxEnv`. Returns nil when the QUERY itself failed (launch error /
-    /// non-zero exit / timeout) — distinct from `.detached` (a successful query with 0
-    /// clients) so the caller's diagnostic can tell "tmux query failed" from "detached".
-    static func attachedClientTTY(launcher: Launcher, socket: String, pane: String) -> TmuxEnv.ClientChoice? {
+    /// The attached (non-control) clients for `pane`'s session. `list-clients -t <pane>`
+    /// filters to the session containing the pane; its
+    /// `#{client_tty}:#{client_pid}:#{client_control_mode}` rows are parsed by the pure
+    /// `TmuxEnv` (pid = the ancestry key for identifying the client's hosting terminal
+    /// app). Returns the FULL list (the caller chooses/filters — the remote-attach filter
+    /// needs every client, not a pre-collapsed choice). nil when the QUERY itself failed
+    /// (launch error / non-zero exit / timeout) — distinct from an empty list (a
+    /// successful query, detached) so the caller can tell "query failed" from "detached".
+    static func attachedClients(launcher: Launcher, socket: String, pane: String) -> [TmuxEnv.Client]? {
         let args = launcher.prefixArgs + [
-            "-S", socket, "list-clients", "-t", pane, "-F", "#{client_tty}:#{client_control_mode}"
+            "-S", socket, "list-clients", "-t", pane,
+            "-F", "#{client_tty}:#{client_pid}:#{client_control_mode}"
         ]
         guard let result = run(exe: launcher.exe, args: args, timeout: timeout),
               result.status == 0 else {
             return nil
         }
-        return TmuxEnv.chooseClientTTY(TmuxEnv.parseClientTTYs(listClientsOutput: result.stdout))
+        return TmuxEnv.parseClients(listClientsOutput: result.stdout)
     }
 
     /// Snap the user onto `pane`: select its window then the pane itself. Best-effort (the

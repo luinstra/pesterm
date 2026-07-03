@@ -36,36 +36,74 @@ final class TmuxRevealTests: XCTestCase {
         XCTAssertNil(TmuxEnv.captureTarget(env: [:]))
     }
 
-    // MARK: parseClientTTYs / chooseClientTTY
+    // MARK: parseClients / chooseClient (tty:pid:control — pid rides for host ancestry)
 
     func testParseAndChooseOne() {
-        let ttys = TmuxEnv.parseClientTTYs(listClientsOutput: "/dev/ttys003:0\n")
-        XCTAssertEqual(ttys, ["/dev/ttys003"])
-        XCTAssertEqual(TmuxEnv.chooseClientTTY(ttys), .one("/dev/ttys003"))
+        let clients = TmuxEnv.parseClients(listClientsOutput: "/dev/ttys003:100:0\n")
+        XCTAssertEqual(clients, [TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)])
+        XCTAssertEqual(TmuxEnv.chooseClient(clients), .one(clients[0]))
     }
 
     func testParseAndChooseDetached() {
-        XCTAssertEqual(TmuxEnv.parseClientTTYs(listClientsOutput: ""), [])
-        XCTAssertEqual(TmuxEnv.chooseClientTTY([]), .detached)
+        XCTAssertEqual(TmuxEnv.parseClients(listClientsOutput: ""), [])
+        XCTAssertEqual(TmuxEnv.chooseClient([]), .detached)
     }
 
     func testParseAndChooseMultiple() {
-        let ttys = TmuxEnv.parseClientTTYs(listClientsOutput: "/dev/ttys003:0\n/dev/ttys005:0\n")
-        XCTAssertEqual(ttys, ["/dev/ttys003", "/dev/ttys005"])
-        XCTAssertEqual(TmuxEnv.chooseClientTTY(ttys), .multiple)
+        let clients = TmuxEnv.parseClients(
+            listClientsOutput: "/dev/ttys003:100:0\n/dev/ttys005:200:0\n")
+        XCTAssertEqual(clients.map { $0.tty }, ["/dev/ttys003", "/dev/ttys005"])
+        XCTAssertEqual(TmuxEnv.chooseClient(clients), .multiple)
     }
 
     func testControlModeRowsDropped() {
         // A control-mode client (e.g. IDE integration) must never become the target.
-        let ttys = TmuxEnv.parseClientTTYs(listClientsOutput: "/dev/ttys003:0\n/dev/ttys009:1\n")
-        XCTAssertEqual(ttys, ["/dev/ttys003"])
-        XCTAssertEqual(TmuxEnv.chooseClientTTY(ttys), .one("/dev/ttys003"))
+        let clients = TmuxEnv.parseClients(
+            listClientsOutput: "/dev/ttys003:100:0\n/dev/ttys009:999:1\n")
+        XCTAssertEqual(clients, [TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)])
+        XCTAssertEqual(TmuxEnv.chooseClient(clients), .one(clients[0]))
     }
 
     func testOnlyControlModeIsDetached() {
-        let ttys = TmuxEnv.parseClientTTYs(listClientsOutput: "/dev/ttys009:1\n")
-        XCTAssertEqual(ttys, [])
-        XCTAssertEqual(TmuxEnv.chooseClientTTY(ttys), .detached)
+        let clients = TmuxEnv.parseClients(listClientsOutput: "/dev/ttys009:999:1\n")
+        XCTAssertEqual(clients, [])
+        XCTAssertEqual(TmuxEnv.chooseClient(clients), .detached)
+    }
+
+    // MARK: multi-client diagnostics — remote attaches named, local ambiguity kept honest
+
+    func testMultipleDiagnosticSaysLocallyHosted() {
+        // After the remote-attach filter, .multiple means multiple LOCAL displays.
+        let s = TmuxRevealer.failureDiagnostic(.multiple, pane: "%1")
+        XCTAssertTrue(s.contains("local"), "post-filter ambiguity is between LOCAL clients")
+        XCTAssertTrue(s.hasSuffix("no reveal performed"))
+    }
+
+    func testRemoteOnlyDiagnosticNamesRemoteAttaches() {
+        let s = TmuxRevealer.failureDiagnostic(.remoteOnly, pane: "%1")
+        XCTAssertTrue(s.contains("mosh") || s.contains("remote"),
+                      "the invisible culprit (mosh/ssh attach) must be named")
+        XCTAssertTrue(s.hasSuffix("no reveal performed"))
+    }
+
+    // MARK: hostedFrontDiagnostic — tier-2 fronting is truthful about its ceiling
+
+    func testHostedFrontDiagnosticNamesHostAndCeiling() {
+        let s = TmuxRevealer.hostedFrontDiagnostic(appName: "Ghostty", pane: "%2",
+                                                   iTermGrant: nil)
+        XCTAssertTrue(s.contains("fronted Ghostty"))
+        XCTAssertTrue(s.contains("%2"))
+        XCTAssertTrue(s.contains("iTerm-only"), "must state the exact-tab precision ceiling")
+        XCTAssertFalse(s.contains("Automation"), "no grant nag when the grant isn't implicated")
+    }
+
+    func testHostedFrontDiagnosticNamesGrantWhenITermHostMissed() {
+        // Ancestry says iTerm but the tty match missed → the Automation grant is the
+        // prime suspect; the message must name it (the classic silent-failure trap).
+        let s = TmuxRevealer.hostedFrontDiagnostic(appName: "iTerm2", pane: "%2",
+                                                   iTermGrant: .denied)
+        XCTAssertTrue(s.contains("fronted iTerm2"))
+        XCTAssertTrue(s.contains("Automation"), "denied grant must be named")
     }
 
     // MARK: normalizeTTY
@@ -162,8 +200,9 @@ final class TmuxRevealTests: XCTestCase {
     }
 
     func testFailureDiagnosticMultiple() {
+        // Post-remote-filter, .multiple means multiple LOCALLY-HOSTED displays.
         let s = TmuxRevealer.failureDiagnostic(.multiple, pane: "%3")
-        XCTAssertTrue(s.contains("multiple tmux clients"))
+        XCTAssertTrue(s.contains("multiple locally-hosted tmux clients"))
         XCTAssertTrue(s.contains("%3"))
     }
 

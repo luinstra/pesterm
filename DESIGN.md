@@ -214,13 +214,16 @@ pesterm post \
 - **Banner icon = posting bundle**; can't override per-notification.
 - **`ITERM_SESSION_ID` is inherited from the agent's env** — reveal reads env, never the payload.
 - **The app must outlive the post** to handle the click; model the keep-alive explicitly.
-- **tmux reveal is iTerm-only, and fronting follows evidence:** iTerm is fronted only
-  AFTER a verified attached-client tty match; on any other outcome (detached, multiple
-  clients, query failure, tty miss) NOTHING is fronted — the tmux server may be hosted
-  by Ghostty/Terminal.app, where fronting iTerm is actively the wrong app. So
-  tmux-under-Ghostty degrades to "notification posts, click fronts nothing" by design,
-  and a genuine tmux-under-iTerm miss no longer gets the old "front iTerm anyway"
-  consolation (fronting on a guess was the bug class).
+- **tmux fronting follows evidence, in two tiers:** a verified attached-client tty
+  match fronts iTerm and selects the exact tab (full precision — iTerm-only, since only
+  iTerm exposes session ttys). When the tty match misses, the client's PROCESS ANCESTRY
+  (`#{client_pid}` walked up to its hosting .app) identifies which terminal actually
+  hosts the client — that app is fronted and the pane snapped inside tmux (the attached
+  client displays it), so tmux-under-Ghostty gets "right app + right pane", with
+  exact-tab selection pending a Ghostty tty property (ghostty#11592). Both tiers are
+  evidence-based; when NEITHER yields (detached, multiple clients, query failure,
+  unclassifiable host) NOTHING is fronted — fronting on a guess was the bug class the
+  reveal-time reorder eliminated.
 
 ## 11a. Tool approvals (blocking `PermissionRequest` hook) — NOTIFICATION-BUTTONS v1
 
