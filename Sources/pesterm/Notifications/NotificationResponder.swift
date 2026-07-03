@@ -35,10 +35,17 @@ final class NotificationResponder: NSObject, NSApplicationDelegate, UNUserNotifi
         // notification activation). Setting it here, in didFinishLaunching, is what lets the
         // OS hand us the click.
         UNUserNotificationCenter.current().delegate = self
+        // The RESPONDER_* lines are the relaunch process's half of the tap timeline —
+        // the LAUNCH→DIDRECEIVE→(WROTE|REVEAL) gaps split LaunchServices spawn latency
+        // from delivery latency from reveal work. Without them a relaunch handling is
+        // indistinguishable from a lost tap. Marker-gated only (a LaunchServices
+        // relaunch inherits no curated env, so PESTERM_TRACE can never reach it).
+        Trace.log("RESPONDER_LAUNCH")
 
         // No response within the window → stray launch (not a notification). Exit cleanly.
         timeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.strayLaunchTimeout,
                                             repeats: false) { _ in
+            Trace.log("RESPONDER_STRAY no response within \(Self.strayLaunchTimeout)s")
             exit(0)
         }
     }
@@ -50,18 +57,22 @@ final class NotificationResponder: NSObject, NSApplicationDelegate, UNUserNotifi
     ) {
         timeoutTimer?.invalidate()
         let request = response.notification.request
+        Trace.log("RESPONDER_DIDRECEIVE responseId=\(request.identifier) action=\(response.actionIdentifier)")
 
         // Permission Approve/Deny: hand the decision to the owning process via the store
         // (keyed by the notification id). We are NOT the owner, so we never write stdout.
         if let decision = PermissionFlow.decision(forActionIdentifier: response.actionIdentifier) {
             DecisionStore.write(decision, forId: request.identifier)
+            Trace.log("RESPONDER_WROTE id=\(request.identifier) decision=\(decision)")
             completionHandler()
             exit(0)
         }
 
         // Body/default click: reveal the CLICKED notification's tab from its userInfo target
         // (env revealer is the fallback, normally nil for a relaunch).
-        let target = Self.revealer(from: request.content.userInfo) ?? revealer
+        let fromUserInfo = Self.revealer(from: request.content.userInfo)
+        let target = fromUserInfo ?? revealer
+        Trace.log("RESPONDER_REVEAL source=\(fromUserInfo != nil ? "userInfo" : (target != nil ? "envFallback" : "none"))")
         if let target = target {
             do {
                 try target.reveal()
