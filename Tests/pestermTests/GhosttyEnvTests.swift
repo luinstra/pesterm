@@ -126,11 +126,12 @@ final class GhosttyEnvTests: XCTestCase {
     }
 
     func testChooseTerminalSymlinkResolvedRetry() {
-        // PROVISIONAL fixture (plan addendum): until the deferred live check records real
-        // observed $PWD / `working directory` pairs, this uses macOS's stable /tmp →
-        // /private/tmp symlink to pin the second branch: a logical $PWD must match a
-        // physical `working directory` (and vice versa) via the symlink-resolved retry.
-        // Replace with observed pairs from docs/ghostty-sdef-findings.md check 1.
+        // Live check 1 VERDICT (2026-07-02, Ghostty 1.3.1 — docs/ghostty-sdef-findings.md):
+        // GO. Ghostty reports the LOGICAL path (`/tmp` for `/tmp`), byte-equal to $PWD, so
+        // the raw compare is the hot path and this retry branch is belt-and-braces for
+        // exotic setups. The /tmp ↔ /private/tmp fixture below is kept deliberately: it
+        // pins that the retry still reconciles a logical/physical mismatch if a future
+        // Ghostty (or unusual filesystem) ever produces one.
         let physical = [candidate(1, cwd: "/private/tmp")]
         XCTAssertEqual(GhosttyEnv.chooseTerminal(matching: "/tmp", candidates: physical),
                        .one(physical[0].identity))

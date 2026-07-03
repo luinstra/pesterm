@@ -70,28 +70,34 @@ sdp generates these on the `GhosttyGenericMethods` protocol as `activateWindow`,
   components are load-bearing for the re-find or redundant belt-and-braces. Record the
   verdict when the live checks run.
 
-## DEFERRED live checks (plan addendum — run on the user's machine, M-series acceptance)
+## Live checks — RESULTS (run 2026-07-02 against Ghostty 1.3.1, driven via osascript
+## from a tmux-attached session; TCC Automation grant approved live)
 
-These require a human at a live Ghostty ≥ 1.3 session (TCC prompts, Script Editor). Until
-they land, the precise tier ships at bounded risk: every miss degrades to app-front.
+1. **Logical-vs-physical path gate: ✅ GO.** A tab created with initial working directory
+   `/tmp` (a symlink to `/private/tmp`) reports `working directory` = `/tmp` — the
+   LOGICAL path, byte-identical to what `$PWD` reports in that shell. Observed pair:
+   `$PWD` semantics `/tmp` ↔ reported `[/tmp]`. The raw normalized compare is the hot
+   path; the symlink-resolved retry in `chooseTerminal` stays as belt-and-braces for
+   exotic setups but was NOT needed. Additional observed pair from a real session:
+   reported `[/Volumes/Dock/Dev/luinstra/pesterm]` for a shell in that directory —
+   clean POSIX path, NO trailing slash, NO `file://` prefix. The precise tier is live.
+2. **Focus-vs-tab-selection: `focus` alone does BOTH.** With a different tab selected,
+   sending `focus` to a background tab's terminal fronted the window AND flipped that
+   tab's `selected` to true, with no explicit `activate window`/`select tab` sends.
+   The shipped belt-and-braces sequence is confirmed harmless redundancy — KEEP it
+   (preview API; the explicit sends cost nothing and survive semantic drift).
+3. **Shell-integration-off behavior: STILL DEFERRED** (requires a config flip + Ghostty
+   restart — not worth disturbing a live session). Low stakes: the bridge maps a nil
+   cwd to `""`, `chooseTerminal` refuses to match an empty key (guard test), so the
+   expected degrade is app-front + no-match diagnostic regardless of what it yields.
 
-1. **Logical-vs-physical path gate (GO/NO-GO for the precise tier).** In a shell whose
-   `$PWD` is a logical/symlinked path (`cd /tmp` → `$PWD` = `/tmp`, physical
-   `/private/tmp`), compare `$PWD` against the `working directory` AppleScript reports
-   for that terminal. Record: agree raw / agree only after resolving symlinks on both
-   sides / systematically diverge. **Record the actual observed `$PWD`/`working
-   directory` string pairs verbatim — they replace the PROVISIONAL symlink fixtures in
-   `GhosttyEnvTests` (`normalizePath`).** If they diverge beyond symlink resolution, the
-   precise tier is dead weight — re-scope to `.appOnly` per the plan's NO-GO scope.
-2. **Focus-vs-tab-selection.** Does `focus` on a background-tab terminal raise the window
-   AND select its tab by itself, or is the explicit `activate window` + `select tab`
-   required? Record which sends were necessary. (The shipped sequence sends all three
-   regardless; this check decides whether that can ever be slimmed.)
-3. **Shell-integration-off behavior.** With Ghostty shell integration disabled, is
-   `working directory` missing, empty, or stale? Record what the traversal yields — the
-   bridge maps a nil cwd to `""`, which can never match a captured `$PWD`, so the
-   expected degrade is app-front + no-match diagnostic.
+Step 0 item 2d verdict: **terminal ids are UUIDs** (e.g.
+`83C92FB7-6B1E-40AF-87EA-27E266BE3BF3`) — globally unique by construction; window/tab
+ids are prefixed strings (`tab-group-858403c00` / `tab-858d4ce00`). The compound
+`(windowId, tabId, terminalId)` carry is therefore redundant belt-and-braces for the
+re-find, exactly the safe case — no change needed.
 
-Also record while there (from Step 0 item 2d): whether `terminal.id` values repeat across
-windows/tabs (uniqueness scope), and whether `working directory` carries a trailing slash
-or `file://` prefix in practice (the raw values feed `normalizePath` fixtures).
+Scripting notes for future maintenance: the application-level `new tab` command errors
+with `-1708` unless addressed `in <window>` (use `new tab in (front window) with
+configuration cfg`); `working directory` tracks the cwd correctly even for a
+tmux-attached shell (shell integration reports through the attach).
