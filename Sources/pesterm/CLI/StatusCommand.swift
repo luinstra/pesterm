@@ -124,10 +124,64 @@ struct StatusCommand: ParsableCommand {
             print(line)
         }
 
+        // Registration hygiene: notification relaunch resolves by bundle id across
+        // EVERY LaunchServices-registered pesterm.app, so a stray registered copy
+        // (repo build artifact, backup clone) can answer clicks with stale code.
+        // The installed app lives under ~/.local (dot-dir, Spotlight-invisible), so
+        // anything mdfind sees is a stray by definition.
+        print(Self.registrationsLine(visibleStrayCount: Self.visibleStrayRegistrations()))
+
         Foundation.exit(0)
     }
 
     // MARK: - Helpers
+
+    /// PURE: the LaunchServices registration-hygiene line. `nil` count = the scan
+    /// itself failed (mdfind unavailable/timed out) — reported as undetermined, never
+    /// as healthy (a failed check must not read as a passing one).
+    static func registrationsLine(visibleStrayCount: Int?) -> String {
+        guard let count = visibleStrayCount else {
+            return "Registrations: undetermined (mdfind scan failed) — stray pesterm.app "
+                 + "copies cannot be ruled out"
+        }
+        if count == 0 {
+            return "Registrations: ok (no stray pesterm.app copies visible to Spotlight)"
+        }
+        let noun = count == 1 ? "1 stray copy" : "\(count) stray copies"
+        return "Registrations: ⚠ \(noun) of pesterm.app registered with LaunchServices — "
+             + "stale binaries can answer notification clicks; rerun scripts/install.sh to sweep"
+    }
+
+    /// IMPURE: count Spotlight-visible pesterm.app registrations (each is a stray —
+    /// the installed app sits under an unindexed dot-dir). nil on scan failure.
+    /// Time-boxed: a wedged mdfind must not hang `status`.
+    static func visibleStrayRegistrations(timeout: TimeInterval = 3) -> Int? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+        proc.arguments = ["kMDItemCFBundleIdentifier == 'com.luinstra.pesterm'"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+        } catch {
+            return nil
+        }
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            proc.waitUntilExit()
+            done.signal()
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            proc.terminate()
+            _ = done.wait(timeout: .now() + 0.2)
+            return nil
+        }
+        guard proc.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        return out.split(separator: "\n", omittingEmptySubsequences: true).count
+    }
 
     /// Normalize `dir` and each `$PATH` entry (strip trailing slash, resolve symlinks)
     /// before membership test.

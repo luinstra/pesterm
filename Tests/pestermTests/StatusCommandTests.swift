@@ -124,6 +124,35 @@ final class StatusCommandTests: XCTestCase {
         XCTAssertFalse(StatusCommand.resolvesOnPath("pesterm"))
     }
 
+    // Registration hygiene line: LaunchServices must know exactly ONE
+    // com.luinstra.pesterm. Stray registered copies (repo build artifacts, backups)
+    // hijack notification relaunches with stale binaries — a live-debugged failure
+    // (2026-07-02: seven registered copies, June 13 binaries answering clicks). The
+    // installed app lives under ~/.local (dot-dir, Spotlight-invisible), so anything
+    // mdfind CAN see is by definition a stray.
+    func testRegistrationsLineOkWhenNoStrays() {
+        let line = StatusCommand.registrationsLine(visibleStrayCount: 0)
+        XCTAssertTrue(line.contains("ok"), "zero visible strays is the healthy state")
+        XCTAssertFalse(line.contains("install.sh"), "no remediation nag when healthy")
+    }
+
+    func testRegistrationsLineWarnsWithCountAndRemediation() {
+        let one = StatusCommand.registrationsLine(visibleStrayCount: 1)
+        XCTAssertTrue(one.contains("1 stray copy"), "singular form")
+        XCTAssertTrue(one.contains("install.sh"), "names the remediation")
+
+        let many = StatusCommand.registrationsLine(visibleStrayCount: 3)
+        XCTAssertTrue(many.contains("3 stray copies"), "plural form")
+        XCTAssertTrue(many.contains("install.sh"))
+    }
+
+    func testRegistrationsLineUndeterminedWhenScanFails() {
+        // mdfind unavailable/timed out → say so, never claim ok.
+        let line = StatusCommand.registrationsLine(visibleStrayCount: nil)
+        XCTAssertFalse(line.contains("ok ("), "a failed scan must not read as healthy")
+        XCTAssertTrue(line.lowercased().contains("undetermined"))
+    }
+
     // The Ghostty automation status line is installed-app-gated (pure seam; the live
     // NSWorkspace gating is covered by manual check M7).
     func testGhosttyStatusLineOnlyWhenInstalled() {

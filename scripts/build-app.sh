@@ -9,7 +9,14 @@
 # no extra payload to bundle.
 #
 # Run from the repo root: scripts/build-app.sh
-# Output: ./pesterm.app
+# Output: ./.build/pesterm.app
+#
+# The bundle deliberately lives under .build/ (a dot-directory): Spotlight does not
+# index dot-dirs, so a dev bundle here never gets registered with LaunchServices.
+# A bundle at the repo ROOT gets auto-registered by Spotlight in EVERY clone/backup
+# of this repo, and notification relaunch-by-bundle-id then roulettes across all of
+# them — stale binaries answering clicks (live-debugged 2026-07-02: seven registered
+# copies). Only install.sh's copy at $PREFIX/share should ever hold the registration.
 #
 # REUSE: install.sh sources this file to call pesterm_assemble_bundle / pesterm_sign /
 # pesterm_verify_sign. When sourced (BASH_SOURCE != $0) the standalone build at the
@@ -179,7 +186,11 @@ pesterm_verify_sign() {
 # Standalone dev build (only when executed directly, not sourced).
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     cd "$REPO_ROOT"
-    APP_BUNDLE="$REPO_ROOT/pesterm.app"
+    # Under .build/ on purpose — Spotlight-invisible, so this dev bundle never enters
+    # the LaunchServices registration roulette (see header). Migration: remove a
+    # legacy root-level bundle so old checkouts stop re-registering one.
+    APP_BUNDLE="$REPO_ROOT/.build/pesterm.app"
+    rm -rf "$REPO_ROOT/pesterm.app"
 
     # Guard the assignment so a failed build aborts here instead of bundling a stale
     # binary — `set -e` does not propagate out of $(...) and inherit_errexit needs

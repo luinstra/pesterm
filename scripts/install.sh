@@ -118,10 +118,34 @@ if ! mv "$STAGE_APP" "$APP"; then
 fi
 rm -rf "$OLD_APP"
 
-# 6. Register with LaunchServices.
-echo "==> Registering bundle with LaunchServices"
+# 6. Register with LaunchServices — and sweep STRAY registrations of our bundle id.
+#    Notification relaunch resolves by bundle id across EVERY registered copy, so a
+#    stale pesterm.app (repo build artifact, backup clone) can end up answering
+#    notification clicks with old code (live-debugged 2026-07-02: seven registered
+#    copies, June 13 binaries handling taps). The installed app lives under a dot-dir
+#    (~/.local) that Spotlight never indexes, so anything mdfind CAN see is a stray.
+#    Sweeping on EVERY install makes this self-healing: a stray that Spotlight
+#    re-registers later is swept again on the next install. Unregistering touches no
+#    files (reversible); mdfind and lsregister are best-effort (unindexed volumes /
+#    support-tool location may vary) — failures degrade to today's behavior.
+echo "==> Registering bundle with LaunchServices (+ sweeping stray registrations)"
 if [[ -x "$LSREGISTER" ]]; then
     "$LSREGISTER" -f "$APP"
+    if command -v mdfind >/dev/null 2>&1; then
+        # `|| true`: a failing mdfind must degrade to "no sweep", not abort the
+        # install (set -o pipefail would otherwise kill the script here).
+        { mdfind "kMDItemCFBundleIdentifier == '$BUNDLE_ID'" 2>/dev/null || true; } \
+        | while IFS= read -r stray; do
+            [[ -z "$stray" || "$stray" == "$APP" ]] && continue
+            if "$LSREGISTER" -u "$stray"; then
+                echo "    unregistered stray copy: $stray"
+            else
+                echo "warning: could not unregister stray copy: $stray" >&2
+            fi
+        done
+    else
+        echo "warning: mdfind not found (skipping stray-registration sweep)" >&2
+    fi
 else
     echo "warning: lsregister not found at $LSREGISTER (skipping)" >&2
 fi
