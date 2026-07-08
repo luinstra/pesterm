@@ -17,14 +17,26 @@ let package = Package(
         .target(
             name: "CITermBridge",
             path: "Sources/CITermBridge",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            // The pesterm-added probe functions carry honest `_Nullable` returns, which
+            // makes clang demand nullability on EVERY pointer in the header
+            // (-Wnullability-completeness). The rest of the header is a generated sdef
+            // mirror we don't annotate (and regen would clobber in-header pragmas —
+            // verify-sdef.sh blind-cp's), so the audit is silenced HERE, regen-proof.
+            cSettings: [
+                .unsafeFlags(["-Wno-nullability-completeness"])
+            ]
         ),
         // Same shape for the Ghostty ScriptingBridge header (vendored, generated from
         // Ghostty 1.3.1's sdef — see docs/ghostty-sdef-findings.md).
         .target(
             name: "CGhosttyBridge",
             path: "Sources/CGhosttyBridge",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            // Same rationale as CITermBridge: generated header + one _Nullable addition.
+            cSettings: [
+                .unsafeFlags(["-Wno-nullability-completeness"])
+            ]
         ),
         .executableTarget(
             name: "pesterm",
