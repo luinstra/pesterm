@@ -9,7 +9,7 @@ struct RootCommand: ParsableCommand {
         commandName: "pesterm",
         abstract: "pesterm — your CLI agent pesters you back to the right terminal tab.",
         subcommands: [PostCommand.self, ConfigureCommand.self, UnwireCommand.self, StatusCommand.self,
-                      SoundsCommand.self, SampleCommand.self]
+                      SoundsCommand.self, SampleCommand.self, FocusProbeCommand.self]
     )
 
     @Option(name: .long, help: "Read an agent's hook JSON on stdin. Supported: claude (notifications), claude-permission (approvals).")

@@ -324,6 +324,71 @@ future spike revisits escalation, recall that "fits the banner" proves VISIBILIT
 SAFETY — a short dangerous command must not get a frictionless one-tap, so any escalation
 must be dangerous-token driven, not length driven.
 
+## 11b. Focus-aware notification deferral (suppress when provably focused)
+
+**The problem:** Claude Code genuinely waits on the blocking `PermissionRequest` hook
+before rendering its own terminal prompt — so a user ALREADY LOOKING at the asking tab
+stares at a blank terminal for up to 120s while a redundant notification sits in the
+corner. Info banners likewise pester a user already focused on the tab. The 120s wait
+IS the notification's decision channel (Approve/Deny only works while the hook process
+lives), so there can never be both a live actionable notification AND an instant
+terminal prompt — pesterm chooses per-event, based on focus.
+
+**The rule (hard-YES-only):** when the asking terminal session is **provably
+frontmost/focused** at post time —
+
+- `.permission`: skip the notification, play the event's sound via a DETACHED
+  `afplay` (`DetachedSound`; NSSound would be cut off by the immediate exit), emit
+  NOTHING on stdout, `exit 0` → Claude renders its native prompt instantly. This
+  reuses the proven timeout/fallback contract; no new decision JSON.
+- `.info`: suppress the banner, play the sound, `exit 0`.
+- **Anything less than a hard YES** (undetermined, probe timeout, missing Automation
+  grant, unsupported terminal, `PESTERM_PRINT_REQUEST` dry-run) → post exactly like
+  before. Fail toward the notification; never strand an approval on a guess.
+
+**No config surface** (user decision): no flags, no files, on by default — the
+murky-case fallback IS the old behavior. Focus flipping between the check and the
+prompt render is an accepted residual race. Explicit user posts (`pesterm post` /
+`sample`) always post; the gate lives only in `main.swift`'s adapter path
+(`buildFromAdapter`'s `.post` branch, after the sound/timeout overrides).
+
+**Two-tier check** (probe verdicts are the two-state `FocusVerdict` — `.focused` /
+`.unverified(reason)` — so "murky" can never be conflated with "yes"; the pure
+`FocusPolicy.action` suppresses only on `.focused` AND
+`supportsFocusSuppression(for:)`, both defaulted OFF in the `TerminalRevealer`
+protocol extension so unported terminals never suppress):
+
+- **Tier 0** (all terminals, no Apple Events): `NSWorkspace.frontmostApplication`
+  bundle id vs the host terminal's. Not frontmost → post, no probe child spawned.
+- **Tier 1** (only when the host app is frontmost; the ScriptingBridge read runs in a
+  **disposable CHILD PROCESS** — `pesterm _focus-probe <variant>`, a hidden pure-CLI
+  subcommand that never constructs NSApplication; the parent time-boxes it at 0.5s
+  via `Subprocess` and SIGTERMs a wedged child, so no SB runs off-main or in the
+  hook process itself. Child contract: one stdout line = the observed value; empty /
+  multi-line / any failure = nil = `.unverified`; the child's exit code is ignored):
+  - **iTerm2 (non-tmux):** frontmost window's current session id vs
+    `targetSessionId`. Self-automation (probe child is an iTerm descendant) — no TCC
+    grant needed. Both kinds suppressible.
+  - **tmux — iTerm-only** (same precision ceiling as the exact-tab reveal; tmux under
+    Ghostty/Terminal.app always posts): hard YES = target pane active
+    (`display-message '#{window_active}#{pane_active}'` == `11`) AND exactly one
+    locally-hosted attached client (the shared `TmuxEnv.resolveClients` rule —
+    `.remoteOnly` preserved for the mosh diagnostic) AND that client's tty == the tty
+    of iTerm's frontmost session. Requires the same Automation grant as the tmux
+    reveal; `AutomationGrant.checkITerm()` is checked BEFORE spawning the probe child
+    (`askUserIfNeeded: false`) so a background probe never pops a consent dialog.
+  - **Ghostty — info-path ONLY:** focused surface's `workingDirectory` vs the captured
+    cwd (`GhosttyEnv.focusedCwdMatches`, same two-pass compare as the reveal).
+    **Permission suppression deliberately withheld**: two surfaces sharing a cwd are
+    indistinguishable, and a wrong suppress on a permission would strand the approval.
+    Self-heals if ghostty#11592 lands a tty property.
+
+**Cost:** Tier 0 is free and short-circuits everything. A wedged probe can only DELAY
+the post (≤0.5s child cap; tmux worst ~1.3s with 2×0.4s tmux CLI calls), never wrongly
+suppress. Probe steps Trace-log with `FOCUS_PROBE_ITERM` / `FOCUS_PROBE_TMUX` /
+`FOCUS_PROBE_GHOSTTY` markers; unverified reasons live in the Trace, not in the
+decision path.
+
 ## 12. Roadmap
 
 - **Phase 0** — this spec.

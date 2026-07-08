@@ -186,3 +186,23 @@ BOOL pesterm_reveal_iterm_session(NSString *targetSessionId, NSString *bundleId)
  */
 BOOL pesterm_reveal_iterm_session_by_tty(NSString *tty, NSString *bundleId);
 
+/*
+ * Focus-probe helper (focus-aware notification deferral): return the `id` of the
+ * FRONTMOST window's current session (`app.currentWindow.currentSession.id`), or nil
+ * when unavailable (iTerm not running/scriptable, no windows, Automation grant
+ * missing — the traversal just comes back empty). READ-ONLY: no `select` calls
+ * anywhere — a probe must never move focus. Same ObjC-not-Swift rationale as the
+ * reveal helpers above (SBApplication's dynamic subclass defeats Swift `as?`), and
+ * the same rule: no decision logic here — the caller compares the returned id.
+ */
+NSString * _Nullable pesterm_iterm_frontmost_session_id(NSString *bundleId);
+
+/*
+ * Like pesterm_iterm_frontmost_session_id, but returns the frontmost window's current
+ * session TTY (`app.currentWindow.currentSession.tty`, e.g. "/dev/ttys003") — the
+ * tmux focus probe's host-side key (compared against the attached tmux client's tty).
+ * Whitespace handling is left to the Swift caller (`TmuxEnv.normalizeTTY`). READ-ONLY,
+ * no `select` calls; nil on any failure.
+ */
+NSString * _Nullable pesterm_iterm_frontmost_session_tty(NSString *bundleId);
+

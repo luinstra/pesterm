@@ -146,6 +146,18 @@ private func timeoutArgument(in args: [String]) -> TimeInterval? {
 /// machinery runs (heeding the GUARD NOTE above — the permission path needs `app.run()`
 /// to deliver and wait).
 ///
+/// THREE suppression sources share the emit-nothing contract (stderr diagnostic +
+/// exit 0, ZERO stdout bytes — stdout is Claude's decision channel):
+///  1. the adapter's own `.suppress` (unknown type, unmediated tool, bad JSON),
+///  2. the unknown-adapter guard above, and
+///  3. the FOCUS suppress below — when the asking terminal session is provably
+///     frontmost (`FocusVerdict.focused` AND the kind is suppressible for that
+///     terminal), the notification is skipped, the event's sound plays detached, and
+///     on `.permission` Claude renders its terminal prompt instantly. Anything less
+///     than a hard YES posts exactly like before (never strand an approval on a
+///     guess). Skipped entirely under PESTERM_PRINT_REQUEST so the install/verify
+///     dry-run stays deterministic.
+///
 /// Dispatch goes through `AdapterRegistry`, so adding an agent is a new `AgentAdapter`
 /// conformance + one registry line — this function never names a concrete adapter.
 private func buildFromAdapter(_ adapter: String, soundOverride: String?,
@@ -174,6 +186,30 @@ private func buildFromAdapter(_ adapter: String, soundOverride: String?,
         // `--sound none` (and synonyms) silences the notification — uniformly, even on the
         // permission path that otherwise ignores --sound (force nil here, post-build).
         if SoundLibrary.isSilenceToken(soundOverride) { request.sound = nil }
+        // Focus-aware deferral (D2): AFTER both overrides (request.sound is final),
+        // BEFORE returning — so it runs pre-NSApplication and only on the adapter
+        // path (`pesterm post`/`sample` and the responder are untouched). NSWorkspace
+        // is an AppKit READ, no run loop needed.
+        if env["PESTERM_PRINT_REQUEST"] == nil, let revealer = revealer {
+            // `supported` gates the probe (no Apple-Event cost for a kind that could
+            // never suppress) AND is passed to the policy, which re-checks it —
+            // intentional defense in depth, not redundancy.
+            let supported = revealer.supportsFocusSuppression(for: request.kind)
+            let verdict = supported
+                ? revealer.probeFocus(frontmostBundleID:
+                      NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+                : FocusVerdict.unverified("kind not suppressible for this terminal")
+            switch FocusPolicy.action(kind: request.kind, verdict: verdict,
+                                      probeSupportsKind: supported,
+                                      resolvedSound: request.sound) {
+            case .suppress(let soundName, let diagnostic):
+                DetachedSound.play(name: soundName)
+                FileHandle.standardError.write(Data((diagnostic + "\n").utf8))
+                exit(0)   // emits NOTHING on stdout — the proven fallback contract
+            case .post:
+                break     // unverified reasons were already Trace-logged at the probe layer (D3)
+            }
+        }
         return (request, revealer)
     case .suppress(let message):
         FileHandle.standardError.write(Data((message + "\n").utf8))

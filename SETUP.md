@@ -159,6 +159,12 @@ Tapping **Approve** allows the tool, tapping **Deny** denies it — and the term
 `1.Yes/2.No` menu is suppressed. Because approvals own `permission_prompt`, the
 `Notification` hook's matcher drops that type when both are wired (no double banner).
 
+**Focus deferral:** if the asking terminal tab is provably frontmost when the hook
+fires, pesterm posts **no notification** — it plays the sound and exits immediately, so
+Claude's own terminal prompt appears right away instead of after the 120s wait. Anything
+short of certainty (different tab, app not frontmost, probe failure, missing Automation
+grant in tmux) posts the notification exactly as described above (DESIGN.md §11b).
+
 ```json
 {
   "hooks": {

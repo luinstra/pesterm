@@ -72,6 +72,57 @@ final class SoundLibraryTests: XCTestCase {
         XCTAssertEqual(names, [])
     }
 
+    // MARK: - filePath (detached-afplay resolution, D4)
+
+    func testFilePathFoundInFirstDirectoryWinsOverLater() throws {
+        let other = scratch.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try Data().write(to: scratch.appendingPathComponent("Glass.caf"))
+        try Data().write(to: other.appendingPathComponent("Glass.aiff"))
+
+        // Even though the LATER directory has the preferred extension, directory
+        // precedence wins first (NSSound's user → local → system order).
+        let path = SoundLibrary.filePath(forName: "Glass",
+                                         inDirectories: [scratch.path, other.path])
+        XCTAssertEqual(path, scratch.appendingPathComponent("Glass.caf").path)
+    }
+
+    func testFilePathExtensionTieBreakFollowsDocumentedOrder() throws {
+        try touch("Glass.wav")
+        try touch("Glass.aiff")
+        try touch("Glass.m4a")
+        let path = SoundLibrary.filePath(forName: "Glass", inDirectories: [scratch.path])
+        XCTAssertEqual(path, scratch.appendingPathComponent("Glass.aiff").path)
+
+        try touch("Pop.m4r")
+        try touch("Pop.caf")
+        let pop = SoundLibrary.filePath(forName: "Pop", inDirectories: [scratch.path])
+        XCTAssertEqual(pop, scratch.appendingPathComponent("Pop.caf").path)
+    }
+
+    func testFilePathUnknownNameIsNil() throws {
+        try touch("Glass.aiff")
+        XCTAssertNil(SoundLibrary.filePath(forName: "Nope", inDirectories: [scratch.path]))
+    }
+
+    func testFilePathIgnoresNonSoundFiles() throws {
+        try touch("Glass.txt")
+        try touch("Glass.png")
+        XCTAssertNil(SoundLibrary.filePath(forName: "Glass", inDirectories: [scratch.path]))
+    }
+
+    func testFilePathEmptyNameIsNil() {
+        XCTAssertNil(SoundLibrary.filePath(forName: "", inDirectories: [scratch.path]))
+        XCTAssertNil(SoundLibrary.filePath(forName: "  \n", inDirectories: [scratch.path]))
+    }
+
+    func testFilePathMissingDirectorySkipped() throws {
+        try touch("Glass.aiff")
+        let path = SoundLibrary.filePath(forName: "Glass",
+                                         inDirectories: ["/no/such/dir", scratch.path])
+        XCTAssertEqual(path, scratch.appendingPathComponent("Glass.aiff").path)
+    }
+
     // sample resolution: a known system sound resolves; a bogus name does not.
     // (No audio is played — we only exercise the resolution helper.)
     func testResolvesKnownSystemSound() {

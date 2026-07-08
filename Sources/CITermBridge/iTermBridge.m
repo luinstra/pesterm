@@ -122,3 +122,62 @@ BOOL pesterm_reveal_iterm_session_by_tty(NSString *tty, NSString *bundleId) {
 
     return NO;
 }
+
+/*
+ * pesterm_iterm_frontmost_session_id — read-only focus probe (see header). Nil-safe at
+ * every hop: a missing app, window, or session yields nil, never a crash. NO selects.
+ */
+NSString * _Nullable pesterm_iterm_frontmost_session_id(NSString *bundleId) {
+    if (bundleId == nil) {
+        return nil;
+    }
+
+    iTermBridgeApplication *app =
+        (iTermBridgeApplication *)[SBApplication
+            applicationWithBundleIdentifier:bundleId];
+    if (app == nil) {
+        return nil;
+    }
+
+    iTermBridgeWindow *window = app.currentWindow;
+    if (window == nil) {
+        return nil;
+    }
+
+    iTermBridgeSession *session = window.currentSession;
+    if (session == nil) {
+        return nil;
+    }
+
+    return session.id;
+}
+
+/*
+ * pesterm_iterm_frontmost_session_tty — read-only focus probe, tty flavor (see
+ * header). Same nil-safe hop discipline; whitespace trimming is the Swift caller's
+ * job (TmuxEnv.normalizeTTY). NO selects.
+ */
+NSString * _Nullable pesterm_iterm_frontmost_session_tty(NSString *bundleId) {
+    if (bundleId == nil) {
+        return nil;
+    }
+
+    iTermBridgeApplication *app =
+        (iTermBridgeApplication *)[SBApplication
+            applicationWithBundleIdentifier:bundleId];
+    if (app == nil) {
+        return nil;
+    }
+
+    iTermBridgeWindow *window = app.currentWindow;
+    if (window == nil) {
+        return nil;
+    }
+
+    iTermBridgeSession *session = window.currentSession;
+    if (session == nil) {
+        return nil;
+    }
+
+    return session.tty;
+}

@@ -36,24 +36,35 @@ final class TmuxRevealTests: XCTestCase {
         XCTAssertNil(TmuxEnv.captureTarget(env: [:]))
     }
 
-    // MARK: parseClients / chooseClient (tty:pid:control — pid rides for host ancestry)
+    // MARK: parseClients / resolveClients (tty:pid:control — pid rides for host ancestry)
 
-    func testParseAndChooseOne() {
+    // `resolveClients` replaced the former chooseClient/chooseLocalClient pair (the
+    // focus-probe extraction) — one resolution rule for reveal AND probe. Unclassified
+    // singles ride as `locallyHosted: false` because the single-client path never
+    // filters (the no-filter rule, matching the old inline reveal()).
+
+    private func unclassified(_ clients: [TmuxEnv.Client])
+        -> [(client: TmuxEnv.Client, locallyHosted: Bool)] {
+        return clients.map { ($0, false) }
+    }
+
+    func testParseAndResolveOne() {
         let clients = TmuxEnv.parseClients(listClientsOutput: "/dev/ttys003:100:0\n")
         XCTAssertEqual(clients, [TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)])
-        XCTAssertEqual(TmuxEnv.chooseClient(clients), .one(clients[0]))
+        XCTAssertEqual(TmuxEnv.resolveClients(unclassified(clients)), .one(clients[0]))
     }
 
-    func testParseAndChooseDetached() {
+    func testParseAndResolveDetached() {
         XCTAssertEqual(TmuxEnv.parseClients(listClientsOutput: ""), [])
-        XCTAssertEqual(TmuxEnv.chooseClient([]), .detached)
+        XCTAssertEqual(TmuxEnv.resolveClients([]), .detached)
     }
 
-    func testParseAndChooseMultiple() {
+    func testParseAndResolveMultipleLocals() {
         let clients = TmuxEnv.parseClients(
             listClientsOutput: "/dev/ttys003:100:0\n/dev/ttys005:200:0\n")
         XCTAssertEqual(clients.map { $0.tty }, ["/dev/ttys003", "/dev/ttys005"])
-        XCTAssertEqual(TmuxEnv.chooseClient(clients), .multiple)
+        // Two clients both locally hosted → genuine ambiguity.
+        XCTAssertEqual(TmuxEnv.resolveClients(clients.map { ($0, true) }), .multiple)
     }
 
     func testControlModeRowsDropped() {
@@ -61,13 +72,46 @@ final class TmuxRevealTests: XCTestCase {
         let clients = TmuxEnv.parseClients(
             listClientsOutput: "/dev/ttys003:100:0\n/dev/ttys009:999:1\n")
         XCTAssertEqual(clients, [TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)])
-        XCTAssertEqual(TmuxEnv.chooseClient(clients), .one(clients[0]))
+        XCTAssertEqual(TmuxEnv.resolveClients(unclassified(clients)), .one(clients[0]))
     }
 
     func testOnlyControlModeIsDetached() {
         let clients = TmuxEnv.parseClients(listClientsOutput: "/dev/ttys009:999:1\n")
         XCTAssertEqual(clients, [])
-        XCTAssertEqual(TmuxEnv.chooseClient(clients), .detached)
+        XCTAssertEqual(TmuxEnv.resolveClients(unclassified(clients)), .detached)
+    }
+
+    func testResolveSingleUnclassifiedIsOneNoFilterRule() {
+        // Exactly 1 client → .one WITHOUT local filtering — behavior-preserving vs the
+        // old reveal(), which only filtered on the multiple case.
+        let c = TmuxEnv.Client(tty: "/dev/ttys003", pid: nil)
+        XCTAssertEqual(TmuxEnv.resolveClients([(c, false)]), .one(c))
+    }
+
+    func testResolveAllRemoteIsRemoteOnly() {
+        let a = TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)
+        let b = TmuxEnv.Client(tty: "/dev/ttys005", pid: 200)
+        XCTAssertEqual(TmuxEnv.resolveClients([(a, false), (b, false)]), .remoteOnly)
+    }
+
+    func testResolveMixedOneLocalWins() {
+        let remote = TmuxEnv.Client(tty: "/dev/ttys003", pid: 100)
+        let local = TmuxEnv.Client(tty: "/dev/ttys005", pid: 200)
+        XCTAssertEqual(TmuxEnv.resolveClients([(remote, false), (local, true)]), .one(local))
+    }
+
+    // MARK: TmuxEnv.parseActiveFlags (focus probe, tmux-side)
+
+    func testParseActiveFlagsOnlyElevenIsTrue() {
+        XCTAssertTrue(TmuxEnv.parseActiveFlags("11"))
+        XCTAssertTrue(TmuxEnv.parseActiveFlags("11\n"), "trailing newline tolerated")
+        XCTAssertFalse(TmuxEnv.parseActiveFlags(""))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("10"))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("01"))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("0"))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("garbage"))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("1 1"))
+        XCTAssertFalse(TmuxEnv.parseActiveFlags("111"))
     }
 
     // MARK: multi-client diagnostics — remote attaches named, local ambiguity kept honest
@@ -84,6 +128,15 @@ final class TmuxRevealTests: XCTestCase {
         XCTAssertTrue(s.contains("mosh") || s.contains("remote"),
                       "the invisible culprit (mosh/ssh attach) must be named")
         XCTAssertTrue(s.hasSuffix("no reveal performed"))
+    }
+
+    func testRemoteOnlyDiagnosticByteIdenticalAfterResolutionExtraction() {
+        // Pin the exact text: the resolveClients extraction must not drift the
+        // reveal-path diagnostic (the forgotten-mosh-attach story).
+        XCTAssertEqual(
+            TmuxRevealer.failureDiagnostic(.remoteOnly, pane: "%1"),
+            "attached tmux clients for pane %1 are all remote or unsupported "
+            + "(a mosh/ssh attach can't be revealed locally); no reveal performed")
     }
 
     // MARK: hostedFrontDiagnostic — tier-2 fronting is truthful about its ceiling

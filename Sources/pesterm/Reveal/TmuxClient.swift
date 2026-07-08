@@ -49,7 +49,16 @@ enum TmuxClient {
     /// needs every client, not a pre-collapsed choice). nil when the QUERY itself failed
     /// (launch error / non-zero exit / timeout) — distinct from an empty list (a
     /// successful query, detached) so the caller can tell "query failed" from "detached".
-    static func attachedClients(launcher: Launcher, socket: String, pane: String) -> [TmuxEnv.Client]? {
+    ///
+    /// Focus-probe note: because `list-clients -t <pane>` scopes to the PANE'S SESSION
+    /// (a tmux client is attached to exactly one session), an attached client shown
+    /// here is VIEWING that session — the session-level focus dimension is covered by
+    /// this existing query; `paneIsActive` adds the window/pane dimension.
+    ///
+    /// `timeout` defaults to the existing 1.5s (reveal path byte-identical); the focus
+    /// probe passes 0.4 for its tighter budget.
+    static func attachedClients(launcher: Launcher, socket: String, pane: String,
+                                timeout: TimeInterval = TmuxClient.timeout) -> [TmuxEnv.Client]? {
         let args = launcher.prefixArgs + [
             "-S", socket, "list-clients", "-t", pane,
             "-F", "#{client_tty}:#{client_pid}:#{client_control_mode}"
@@ -59,6 +68,25 @@ enum TmuxClient {
             return nil
         }
         return TmuxEnv.parseClients(listClientsOutput: result.stdout)
+    }
+
+    /// Is `pane` the ACTIVE pane of the ACTIVE window of its session? Runs
+    /// `tmux -S <socket> display-message -p -t <pane> '#{window_active}#{pane_active}'`
+    /// (argv form — never a shell string, same injection discipline as the header
+    /// documents) and delegates the parse to the pure `TmuxEnv.parseActiveFlags`
+    /// ("11" → true). nil on launch failure / non-zero exit / timeout — the focus
+    /// probe treats nil as undetermined → post.
+    static func paneIsActive(launcher: Launcher, socket: String, pane: String,
+                             timeout: TimeInterval = TmuxClient.timeout) -> Bool? {
+        let args = launcher.prefixArgs + [
+            "-S", socket, "display-message", "-p", "-t", pane,
+            "#{window_active}#{pane_active}"
+        ]
+        guard let result = run(exe: launcher.exe, args: args, timeout: timeout),
+              result.status == 0 else {
+            return nil
+        }
+        return TmuxEnv.parseActiveFlags(result.stdout)
     }
 
     /// Snap the user onto `pane`: select its window then the pane itself. Best-effort (the
@@ -75,35 +103,12 @@ enum TmuxClient {
         return win?.status == 0 && p?.status == 0
     }
 
-    /// Run a process, capturing stdout, with a hard timeout. Returns nil on launch failure
-    /// or timeout (the timeout also rescues a pipe-buffer deadlock — we terminate and bail).
+    /// Run a process, capturing stdout, with a hard timeout — a thin delegate to the
+    /// generalized `Subprocess.run` (the semaphore-timeout pattern was extracted there
+    /// for the focus probe; behavior here is byte-identical — tmux children already had
+    /// stderr nulled and never read stdin).
     private static func run(exe: String, args: [String], timeout: TimeInterval)
         -> (status: Int32, stdout: String)? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: exe)
-        proc.arguments = args
-        let outPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-        } catch {
-            return nil
-        }
-
-        let done = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            proc.waitUntilExit()
-            done.signal()
-        }
-        if done.wait(timeout: .now() + timeout) == .timedOut {
-            proc.terminate()
-            // Let the wait thread reap the SIGTERM'd process (don't orphan it / its pipe FD).
-            _ = done.wait(timeout: .now() + 0.2)
-            return nil
-        }
-
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        return Subprocess.run(exe: exe, args: args, timeout: timeout)
     }
 }

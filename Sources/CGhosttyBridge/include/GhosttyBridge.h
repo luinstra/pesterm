@@ -166,3 +166,13 @@ NSArray<NSDictionary *> * pesterm_ghostty_list_terminals(NSString *bundleID);
  */
 BOOL pesterm_ghostty_focus_terminal(NSString *windowId, NSString *tabId,
                                     NSString *terminalId, NSString *bundleID);
+
+/*
+ * Focus-probe helper (focus-aware notification deferral): the working directory of the
+ * FOCUSED terminal surface — `app.frontWindow.selectedTab.focusedTerminal.
+ * workingDirectory` — or nil on ANY failure (app not scriptable, grant missing, no
+ * windows, no cwd reported yet). READ-ONLY: no activate/select/focus calls — a probe
+ * must never move focus. Same no-decision-logic rule as the helpers above: the pure
+ * Swift GhosttyEnv compares the returned cwd.
+ */
+NSString * _Nullable pesterm_ghostty_focused_terminal_cwd(NSString *bundleID);

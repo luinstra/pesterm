@@ -72,7 +72,9 @@ sounds/timeouts survive a reinstall. It just reports what's wired and checks gra
 
 ### Notifications
 
-When Claude needs you, you get a banner — click it to jump to the tab.
+When Claude needs you, you get a banner — click it to jump to the tab. One exception:
+if you're **already looking at that tab** (it's provably frontmost), pesterm skips the
+banner and just plays the sound — no pestering about a tab you're staring at.
 
 | Event | Meaning | Default sound |
 |-------|---------|---------------|
@@ -89,6 +91,10 @@ is suppressed. Click the notification **body** (not a button) to reveal the tab 
 full context *without* deciding. No response within 120s (tunable — see
 [Notification lifetime](#notification-lifetime---timeout)), or any error, falls back to
 Claude's own terminal prompt and **never auto-allows**.
+
+**Already on the asking tab?** No notification at all — pesterm detects the tab is
+frontmost, plays the sound, and steps aside so Claude's terminal prompt appears
+*instantly* (no 120s wait). When in doubt it posts the notification (DESIGN.md §11b).
 
 Caveats worth knowing:
 

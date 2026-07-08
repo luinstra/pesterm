@@ -80,32 +80,10 @@ final class TmuxRevealer: TerminalRevealer {
             warn(Self.failureDiagnostic(.queryFailed, pane: pane))
             return
         }
-        var choice = TmuxEnv.chooseClient(clients)
-        Trace.log("TMUX_REVEAL clientChoice=\(String(describing: choice)) of \(clients.count)")
+        let resolution = Self.resolveClientChoice(clients)
+        Trace.log("TMUX_REVEAL clientResolution=\(String(describing: resolution)) of \(clients.count)")
 
-        if case .multiple = choice {
-            // Remote-attach filter: a mosh/ssh-hosted client (or one in an unsupported
-            // terminal) cannot be revealed locally — dropping it is logic, not
-            // preference. The recurring real-world case: a forgotten mosh attach
-            // sharing the session with the real terminal tab.
-            let classified: [(client: TmuxEnv.Client, locallyHosted: Bool)] = clients.map { c in
-                let hosted = c.pid.map {
-                    TerminalHost.classify(
-                        executablePaths: ProcessAncestry.executablePaths(startingAt: $0)) != nil
-                } ?? false
-                return (c, hosted)
-            }
-            choice = TmuxEnv.chooseLocalClient(classified)
-            Trace.log("TMUX_REVEAL localFilter \(clients.count) -> \(String(describing: choice))")
-            if case .detached = choice {
-                // Clients exist, none locally revealable — a distinct story from a
-                // genuinely detached session; name the invisible culprit.
-                warn(Self.failureDiagnostic(.remoteOnly, pane: pane))
-                return
-            }
-        }
-
-        switch choice {
+        switch resolution {
         case .one(let client):
             let found = pesterm_reveal_iterm_session_by_tty(client.tty, ITerm2Revealer.iTermBundleID)
             Trace.log("TMUX_REVEAL byTty tty=\(client.tty) found=\(found)")
@@ -147,7 +125,142 @@ final class TmuxRevealer: TerminalRevealer {
             warn(Self.failureDiagnostic(.detached, pane: pane))
         case .multiple:
             warn(Self.failureDiagnostic(.multiple, pane: pane))
+        case .remoteOnly:
+            // Clients exist, none locally revealable — a distinct story from a
+            // genuinely detached session; name the invisible culprit (mosh/ssh).
+            warn(Self.failureDiagnostic(.remoteOnly, pane: pane))
         }
+    }
+
+    /// IMPURE, thin: classify each client's pid via `ProcessAncestry`/`TerminalHost` —
+    /// but only when there is more than one client (the single-client path never
+    /// classified before; matching today's cost profile) — and delegate every decision
+    /// to the pure `TmuxEnv.resolveClients`. Shared by `reveal()` and the focus probe,
+    /// so the reveal-path diagnostics and the probe verdicts can never diverge on the
+    /// same input.
+    static func resolveClientChoice(_ clients: [TmuxEnv.Client]) -> TmuxEnv.ClientResolution {
+        let classified: [(client: TmuxEnv.Client, locallyHosted: Bool)]
+        if clients.count > 1 {
+            classified = clients.map { c in
+                let hosted = c.pid.map {
+                    TerminalHost.classify(
+                        executablePaths: ProcessAncestry.executablePaths(startingAt: $0)) != nil
+                } ?? false
+                return (c, hosted)
+            }
+        } else {
+            // 0 or 1 client: resolveClients never filters these, so skip the
+            // (subprocess-y) ancestry classification entirely.
+            classified = clients.map { ($0, false) }
+        }
+        return TmuxEnv.resolveClients(classified)
+    }
+
+    // MARK: - Focus probe (focus-aware notification deferral)
+
+    /// The probe's impure edges, injectable for orchestration tests (D3 seam). Every
+    /// default is the production implementation; tests swap closures to assert the
+    /// step wiring without tmux, TCC, or ScriptingBridge.
+    struct FocusProbeDeps {
+        var grantCheck: () -> AutomationGrant.State = AutomationGrant.checkITerm
+        var locateLauncher: () -> TmuxClient.Launcher? = TmuxClient.locateLauncher
+        var attachedClients: (TmuxClient.Launcher, String, String, TimeInterval) -> [TmuxEnv.Client]? = {
+            TmuxClient.attachedClients(launcher: $0, socket: $1, pane: $2, timeout: $3)
+        }
+        var resolveClients: ([TmuxEnv.Client]) -> TmuxEnv.ClientResolution =
+            TmuxRevealer.resolveClientChoice
+        var paneIsActive: (TmuxClient.Launcher, String, String, TimeInterval) -> Bool? = {
+            TmuxClient.paneIsActive(launcher: $0, socket: $1, pane: $2, timeout: $3)
+        }
+        var readValue: (String, TimeInterval) -> String? = FocusProbeClient.readValue
+    }
+
+    /// Both kinds are suppressible: a hard YES requires the pane active in tmux AND
+    /// the client's tty fronted in iTerm — an exact, two-sided match.
+    func supportsFocusSuppression(for kind: NotificationKind) -> Bool {
+        return true
+    }
+
+    /// Protocol entry point — production deps.
+    func probeFocus(frontmostBundleID: String?) -> FocusVerdict {
+        return probeFocus(frontmostBundleID: frontmostBundleID, deps: FocusProbeDeps())
+    }
+
+    /// Steps in cost order; EVERY miss → `.unverified(reason)` (fail toward posting).
+    /// Hard YES requires (a) tmux-side: the target pane is the active pane of the
+    /// active window, AND the session has exactly one locally-hosted attached client;
+    /// (b) host-side: that client's tty equals the tty of iTerm's frontmost window's
+    /// current session. Unverified reasons are Trace-logged HERE (D3) — they never
+    /// ride through `FocusAction`.
+    func probeFocus(frontmostBundleID: String?, deps: FocusProbeDeps) -> FocusVerdict {
+        // Step 1: the probe is iTerm-only — the same precision ceiling as the
+        // exact-tab reveal (other hosts expose no tty; ghostty#11592). tmux under
+        // Ghostty/Terminal.app stays on today's always-post path by design.
+        guard FocusPolicy.hostIsFrontmost(expectedBundleID: ITerm2Revealer.iTermBundleID,
+                                          frontmostBundleID: frontmostBundleID) else {
+            Trace.log("FOCUS_PROBE_TMUX tier0=miss frontmost=\(frontmostBundleID ?? "<nil>")")
+            return .unverified("iTerm2 not frontmost (tmux focus probe is iTerm-only)")
+        }
+
+        // Step 2 (D7): inside tmux pesterm is NOT an iTerm descendant (the tmux server
+        // is a launchd daemon), so the host-side read needs the same Automation grant
+        // the tmux reveal already needs. Anything but .granted → post, and the probe
+        // child is NOT spawned — a background probe must never pop a consent dialog
+        // (askUserIfNeeded is false in the check; the prompt still appears naturally
+        // on the first tmux reveal).
+        let grant = deps.grantCheck()
+        guard grant == .granted else {
+            Trace.log("FOCUS_PROBE_TMUX grant=\(grant)")
+            return .unverified("iTerm automation grant not granted")
+        }
+
+        // Step 3: exactly one locally-hosted attached client, via the SAME resolution
+        // rule the reveal path uses (0.4s tmux CLI box — probe budget, not the reveal
+        // path's 1.5s).
+        guard let launcher = deps.locateLauncher() else {
+            Trace.log("FOCUS_PROBE_TMUX launcher=nil")
+            return .unverified("tmux not found")
+        }
+        guard let clients = deps.attachedClients(launcher, socket, pane, 0.4) else {
+            Trace.log("FOCUS_PROBE_TMUX clients=queryFailed")
+            return .unverified("tmux client query failed")
+        }
+        let client: TmuxEnv.Client
+        switch deps.resolveClients(clients) {
+        case .one(let c):
+            client = c
+        case .remoteOnly:
+            Trace.log("FOCUS_PROBE_TMUX clientResolution=remoteOnly")
+            return .unverified("attached clients are remote-only")
+        case .multiple:
+            Trace.log("FOCUS_PROBE_TMUX clientResolution=multiple")
+            return .unverified("multiple locally-hosted clients")
+        case .detached:
+            Trace.log("FOCUS_PROBE_TMUX clientResolution=detached")
+            return .unverified("no attached tmux client")
+        }
+
+        // Step 4 (a, tmux-side): the target pane must be the active pane of the
+        // active window (list-clients already scoped the client to the pane's
+        // SESSION — see TmuxClient.attachedClients).
+        guard deps.paneIsActive(launcher, socket, pane, 0.4) == true else {
+            Trace.log("FOCUS_PROBE_TMUX paneActive=0")
+            return .unverified("target pane not active")
+        }
+
+        // Step 5 (b, host-side): iTerm's frontmost window's current session tty must
+        // equal the attached client's tty (read in the disposable probe child,
+        // 0.5s box; normalized on both sides).
+        guard let frontTty = deps.readValue("iterm-session-tty", 0.5) else {
+            Trace.log("FOCUS_PROBE_TMUX ttyRead=nil")
+            return .unverified("probe timeout/empty")
+        }
+        guard TmuxEnv.normalizeTTY(frontTty) == TmuxEnv.normalizeTTY(client.tty) else {
+            Trace.log("FOCUS_PROBE_TMUX paneActive=1 ttyMatch=0 front=\(frontTty) client=\(client.tty)")
+            return .unverified("iTerm is fronting a different session")
+        }
+        Trace.log("FOCUS_PROBE_TMUX paneActive=1 ttyMatch=1 verdict=focused")
+        return .focused
     }
 
     /// The reveal's failure branches — every one fronts NOTHING (we cannot know which

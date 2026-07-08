@@ -69,6 +69,54 @@ final class GhosttyRevealer: TerminalRevealer {
         return GhosttyRevealer(cwd: target.cwd)
     }
 
+    // MARK: - Focus probe (focus-aware notification deferral)
+
+    /// INFO-PATH ONLY — permission suppression is DELIBERATELY WITHHELD for Ghostty:
+    /// two surfaces sharing a cwd are indistinguishable (no tty/session key,
+    /// ghostty#11592), and a wrong suppress on a permission would strand the approval
+    /// while the user stares at an unfocused tab. A wrong info suppress is low-stakes
+    /// (the sound still plays; nothing blocks), so `.info` may opt in.
+    func supportsFocusSuppression(for kind: NotificationKind) -> Bool {
+        return kind == .info
+    }
+
+    /// Protocol entry point — production reader (the D6 child-process SB read).
+    func probeFocus(frontmostBundleID: String?) -> FocusVerdict {
+        return probeFocus(frontmostBundleID: frontmostBundleID,
+                          readValue: FocusProbeClient.readValue)
+    }
+
+    /// The orchestration seam (D3). Every miss → `.unverified` (fail toward posting);
+    /// unverified reasons are Trace-logged HERE — they never ride through `FocusAction`.
+    func probeFocus(frontmostBundleID: String?,
+                    readValue: (String, TimeInterval) -> String?) -> FocusVerdict {
+        // Tier 0: Ghostty must be the frontmost APP (also guarantees the SB target is
+        // running before any probe child is spawned, D7).
+        guard FocusPolicy.hostIsFrontmost(expectedBundleID: Self.ghosttyBundleID,
+                                          frontmostBundleID: frontmostBundleID) else {
+            Trace.log("FOCUS_PROBE_GHOSTTY tier0=miss frontmost=\(frontmostBundleID ?? "<nil>")")
+            return .unverified("Ghostty not frontmost")
+        }
+        // App-only tier can never be a hard YES: without a captured cwd there is no
+        // precise key to compare — "the right app is frontmost" proves nothing about
+        // WHICH surface is asking.
+        guard let cwd = cwd else {
+            Trace.log("FOCUS_PROBE_GHOSTTY cwd=<none> verdict=unverified")
+            return .unverified("no cwd captured (app-only target)")
+        }
+        // Tier 1: the focused surface's cwd, read in a disposable child (0.5s box).
+        guard let focused = readValue("ghostty-cwd", 0.5) else {
+            Trace.log("FOCUS_PROBE_GHOSTTY read=nil verdict=unverified")
+            return .unverified("probe timeout/empty")
+        }
+        guard GhosttyEnv.focusedCwdMatches(captured: cwd, focused: focused) else {
+            Trace.log("FOCUS_PROBE_GHOSTTY read=\(focused) captured=\(cwd) verdict=unverified")
+            return .unverified("focused surface is in a different directory")
+        }
+        Trace.log("FOCUS_PROBE_GHOSTTY read=\(focused) verdict=focused")
+        return .focused
+    }
+
     // MARK: - Reveal
 
     func reveal() throws {

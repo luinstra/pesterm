@@ -19,6 +19,12 @@ non-zero hook exits, and on PermissionRequest exit 2 means DENY). Each adapter's
 `.post(request)` or `.suppress(reason)` — purely; main.swift owns the stderr write + exit.
 Outbound, `PermissionDecision.outputJSON(for:)` produces the decision Claude reads from stdout.
 
+A THIRD suppression source — focus-aware deferral (DESIGN.md §11b) — lives in
+**main.swift**, not here: after an adapter returns `.post`, the composition root may
+still suppress when the asking tab is provably frontmost (same stderr + exit-0,
+emit-nothing-on-stdout contract). Adapters stay pure and focus-blind; don't add probe
+logic to them.
+
 ## Structure
 
 ```

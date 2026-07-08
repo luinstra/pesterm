@@ -62,6 +62,48 @@ final class ITerm2Revealer: TerminalRevealer {
         return value
     }
 
+    // MARK: - Focus probe (focus-aware notification deferral)
+
+    /// Both kinds are suppressible: the session-GUID match is exact, so a hard YES on
+    /// a permission can never strand an approval on the wrong tab.
+    func supportsFocusSuppression(for kind: NotificationKind) -> Bool {
+        return true
+    }
+
+    /// Protocol entry point — delegates to the injectable overload with the
+    /// production reader (the D6 child-process ScriptingBridge read).
+    func probeFocus(frontmostBundleID: String?) -> FocusVerdict {
+        return probeFocus(frontmostBundleID: frontmostBundleID,
+                          readValue: FocusProbeClient.readValue)
+    }
+
+    /// The orchestration seam (D3): impure edges arrive as a closure so tests can
+    /// assert the Tier0 → read → compare wiring without any ScriptingBridge. Every
+    /// miss is `.unverified` (fail toward posting); unverified REASONS are Trace-logged
+    /// HERE — they never ride through `FocusAction`.
+    func probeFocus(frontmostBundleID: String?,
+                    readValue: (String, TimeInterval) -> String?) -> FocusVerdict {
+        // Tier 0 (no Apple Events, ~free): iTerm must be the frontmost APP. Also
+        // guarantees the SB target is running before any probe child is spawned (D7).
+        guard FocusPolicy.hostIsFrontmost(expectedBundleID: Self.iTermBundleID,
+                                          frontmostBundleID: frontmostBundleID) else {
+            Trace.log("FOCUS_PROBE_ITERM tier0=miss frontmost=\(frontmostBundleID ?? "<nil>")")
+            return .unverified("iTerm2 not frontmost")
+        }
+        // Tier 1: the frontmost window's current session id, read in a disposable
+        // child (0.5s box). nil = timeout/empty/garbage per the D6 contract.
+        guard let observed = readValue("iterm-session-id", 0.5) else {
+            Trace.log("FOCUS_PROBE_ITERM read=nil verdict=unverified")
+            return .unverified("probe timeout/empty")
+        }
+        guard observed == targetSessionId else {
+            Trace.log("FOCUS_PROBE_ITERM read=\(observed) target=\(targetSessionId) verdict=unverified")
+            return .unverified("another session is focused")
+        }
+        Trace.log("FOCUS_PROBE_ITERM read=\(observed) verdict=focused")
+        return .focused
+    }
+
     // MARK: - Reveal
 
     func reveal() throws {

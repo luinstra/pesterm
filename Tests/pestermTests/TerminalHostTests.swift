@@ -35,14 +35,17 @@ final class TerminalHostTests: XCTestCase {
         XCTAssertEqual(clients, [TmuxEnv.Client(tty: "/dev/ttys017", pid: 42)])
     }
 
-    // MARK: chooseClient — same one/detached/multiple discipline, now carrying the Client
+    // MARK: resolveClients — one/detached/multiple/remoteOnly in ONE rule
+    // (replaced the chooseClient/chooseLocalClient pair in the focus-probe extraction)
 
-    func testChooseClientSemantics() {
+    func testResolveClientsCountSemantics() {
         let a = TmuxEnv.Client(tty: "/dev/ttys003", pid: 1)
         let b = TmuxEnv.Client(tty: "/dev/ttys005", pid: 2)
-        XCTAssertEqual(TmuxEnv.chooseClient([]), .detached)
-        XCTAssertEqual(TmuxEnv.chooseClient([a]), .one(a))
-        XCTAssertEqual(TmuxEnv.chooseClient([a, b]), .multiple)
+        XCTAssertEqual(TmuxEnv.resolveClients([]), .detached)
+        // Exactly 1 → .one WITHOUT local filtering (matches the old inline reveal(),
+        // which only filtered on the multiple case).
+        XCTAssertEqual(TmuxEnv.resolveClients([(a, false)]), .one(a))
+        XCTAssertEqual(TmuxEnv.resolveClients([(a, true), (b, true)]), .multiple)
     }
 
     // MARK: TerminalHost.classify — ancestry executable paths → hosting terminal app
@@ -76,7 +79,7 @@ final class TerminalHostTests: XCTestCase {
         XCTAssertEqual(host?.appName, "Ghostty")
     }
 
-    // MARK: chooseLocalClient — remote attaches (mosh/ssh) are NOT reveal candidates
+    // MARK: resolveClients — remote attaches (mosh/ssh) are NOT reveal candidates
 
     func testMoshPlusLocalReducesToTheLocalClient() {
         // THE real-world case: a forgotten mosh attach shares the session with the real
@@ -85,7 +88,7 @@ final class TerminalHostTests: XCTestCase {
         let iterm = TmuxEnv.Client(tty: "/dev/ttys008", pid: 100)
         let mosh = TmuxEnv.Client(tty: "/dev/ttys014", pid: 200)
         XCTAssertEqual(
-            TmuxEnv.chooseLocalClient([(iterm, true), (mosh, false)]),
+            TmuxEnv.resolveClients([(iterm, true), (mosh, false)]),
             .one(iterm))
     }
 
@@ -93,14 +96,15 @@ final class TerminalHostTests: XCTestCase {
         // Two LOCAL displays is genuine ambiguity — still never guess.
         let a = TmuxEnv.Client(tty: "/dev/ttys001", pid: 1)
         let b = TmuxEnv.Client(tty: "/dev/ttys002", pid: 2)
-        XCTAssertEqual(TmuxEnv.chooseLocalClient([(a, true), (b, true)]), .multiple)
+        XCTAssertEqual(TmuxEnv.resolveClients([(a, true), (b, true)]), .multiple)
     }
 
-    func testRemoteOnlyIsDetachedEquivalent() {
-        // Session attached ONLY via mosh/ssh → nothing local to reveal.
-        let mosh = TmuxEnv.Client(tty: "/dev/ttys014", pid: 200)
-        XCTAssertEqual(TmuxEnv.chooseLocalClient([(mosh, false)]), .detached)
-        XCTAssertEqual(TmuxEnv.chooseLocalClient([]), .detached)
+    func testAllRemoteMultiClientIsRemoteOnly() {
+        // Session attached ONLY via mosh/ssh (2+ clients) → nothing local to reveal;
+        // .remoteOnly is first-class so the diagnostic names the invisible culprit.
+        let moshA = TmuxEnv.Client(tty: "/dev/ttys014", pid: 200)
+        let moshB = TmuxEnv.Client(tty: "/dev/ttys015", pid: 201)
+        XCTAssertEqual(TmuxEnv.resolveClients([(moshA, false), (moshB, false)]), .remoteOnly)
     }
 
     func testClassifyUnknownOrEmptyIsNil() {

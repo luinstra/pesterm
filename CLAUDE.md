@@ -32,7 +32,7 @@ hook JSON ─▶ Adapters ─▶ NotificationRequest ─▶ Notifications backen
 | Adapters | `Sources/pesterm/Adapters/` | Claude hook JSON → request; permission decision → JSON |
 | Notifications | `Sources/pesterm/Notifications/` | `UNUserNotificationCenter` post + delegate callbacks |
 | Permission | `Sources/pesterm/Permission/` | Blocking Approve/Deny flow, one-shot gate, fail-safe |
-| Reveal | `Sources/pesterm/Reveal/` | Bring the terminal tab/session forward (iTerm2, Ghostty — ScriptingBridge) |
+| Reveal | `Sources/pesterm/Reveal/` | Bring the terminal tab/session forward (iTerm2, Ghostty — ScriptingBridge); focus-aware deferral probes (`FocusPolicy` + per-revealer `probeFocus`, DESIGN.md §11b) |
 | Wiring | `Sources/pesterm/Wiring/` | Surgically edit `~/.claude/settings.json` hooks |
 | CLI | `Sources/pesterm/CLI/` | `configure`/`status`/`sounds`/`sample`/`post`/`unwire` |
 | Sounds | `Sources/pesterm/Sounds/` | Named system-sound catalog |
@@ -58,7 +58,7 @@ hook JSON ─▶ Adapters ─▶ NotificationRequest ─▶ Notifications backen
 | [Adapters](./Sources/pesterm/Adapters/CLAUDE.md) | Hook-JSON in, decision-JSON out — the Claude contract |
 | [Permission](./Sources/pesterm/Permission/CLAUDE.md) | The blocking Approve/Deny flow and its race discipline |
 | [Wiring](./Sources/pesterm/Wiring/CLAUDE.md) | Non-destructive `settings.json` hook surgery |
-| [DESIGN.md](./DESIGN.md) | Full design spec — invariants, gotchas, decision contract (§11a) |
+| [DESIGN.md](./DESIGN.md) | Full design spec — invariants, gotchas, decision contract (§11a), focus deferral (§11b) |
 | [SETUP.md](./SETUP.md) | End-user install + the one-time notifications grant |
 
 ## Hard Invariants (don't regress these)
@@ -70,10 +70,15 @@ hook JSON ─▶ Adapters ─▶ NotificationRequest ─▶ Notifications backen
    constructing `NSApplication`. ArgumentParser only *builds*; it must never spin the run
    loop. See the GUARD NOTE in `main.swift` before adding any subcommand that needs to post.
 3. **Every adapter exit is `exit(0)`.** Suppressed event, unknown tool, invalid JSON,
-   permission timeout — all exit 0 so Claude falls back to its own terminal UI. A non-zero
-   exit would look like a hook failure. **Never auto-allow on a fallback.**
-4. **The permission hook BLOCKS.** It posts, keeps the run loop alive up to 120s waiting for
-   a human tap, writes the decision JSON to stdout, then exits 0. See the Permission guide.
+   permission timeout, FOCUS suppress (the tab is provably frontmost — DESIGN.md §11b) —
+   all exit 0 so Claude falls back to its own terminal UI. Suppress paths emit NOTHING
+   on stdout (it is Claude's decision channel). A non-zero exit would look like a hook
+   failure. **Never auto-allow on a fallback.**
+4. **The permission hook BLOCKS** — whenever it posts. It keeps the run loop alive up to
+   120s waiting for a human tap, writes the decision JSON to stdout, then exits 0. (The
+   focus gate may skip posting entirely when the tab is provably frontmost — DESIGN.md
+   §11b — but once a notification posts, the blocking contract is untouched.) See the
+   Permission guide.
 5. **Approvals are NOTIFICATION buttons, never a modal.** No focus-stealing window — a
    product decision, not an accident. Don't "upgrade" it to an alert panel.
 

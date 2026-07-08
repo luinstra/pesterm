@@ -107,6 +107,22 @@ enum GhosttyEnv {
         return (normalizePath(path) as NSString).resolvingSymlinksInPath
     }
 
+    /// PURE (focus probe): does the FOCUSED terminal's reported cwd match the captured
+    /// one? Two-pass compare exactly mirroring `chooseTerminal`: normalized-exact
+    /// first, then a symlink-resolved retry on both sides (`$PWD` is the shell's
+    /// LOGICAL path while `working directory` may be physical — /tmp vs /private/tmp).
+    /// nil/empty/whitespace `focused` → false, and an empty NORMALIZED `captured` →
+    /// false (the same empty-match guard: an absent match key must never pair with a
+    /// terminal reporting an empty working directory). False → `.unverified` → post.
+    static func focusedCwdMatches(captured: String, focused: String?) -> Bool {
+        guard let focused = focused else { return false }
+        let target = normalizePath(captured)
+        let candidate = normalizePath(focused)
+        guard !target.isEmpty, !candidate.isEmpty else { return false }
+        if candidate == target { return true }
+        return resolvePath(focused) == resolvePath(captured)
+    }
+
     /// PURE: the diagnostic for a reveal that fronted the app but could not focus a
     /// terminal. Grant-aware (mirror of the tmux by-tty-miss lesson): an ungranted
     /// traversal sees ZERO windows, so a `.noMatch` without the grant must name the

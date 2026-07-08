@@ -13,16 +13,22 @@ enum TmuxEnv {
         let pid: Int32?
     }
 
-    /// The outcome of inspecting the attached tmux clients for a pane's session.
-    /// (Named `detached`/`multiple` rather than `none`/`many` so a `ClientChoice?` switch
-    /// can't confuse the `detached` case with `Optional.none` = a tmux query failure.)
-    enum ClientChoice: Equatable {
-        /// Exactly one non-control client is attached — reveal it.
+    /// The outcome of resolving the attached tmux clients for a pane's session —
+    /// shared by the reveal path and the focus probe. (Named `detached`/`multiple`
+    /// rather than `none`/`many` so a `ClientResolution?` switch can't confuse the
+    /// `detached` case with `Optional.none` = a tmux query failure.) Carries the
+    /// remote-only distinction as a FIRST-CLASS case so the reveal path's mosh/ssh
+    /// diagnostic (the forgotten-remote-attach story) survives the shared extraction.
+    enum ClientResolution: Equatable {
+        /// Exactly one revealable client — reveal / probe it.
         case one(Client)
+        /// Two+ LOCALLY-HOSTED clients — genuine ambiguity, never guess.
+        case multiple
         /// No (non-control) client attached — detached → fall back.
         case detached
-        /// More than one client — ambiguous → fall back (decision: don't guess).
-        case multiple
+        /// Clients are attached, but none is hosted by a local terminal app
+        /// (mosh/ssh attaches, unsupported terminals).
+        case remoteOnly
     }
 
     /// The tmux socket path = field 0 of `$TMUX` (`<socket>,<pid>,<session>`). Returns nil
@@ -79,23 +85,40 @@ enum TmuxEnv {
         return clients
     }
 
-    /// Decision rule (lean + don't-guess): one → reveal it; zero → detached; >1 → multiple.
-    static func chooseClient(_ clients: [Client]) -> ClientChoice {
-        switch clients.count {
-        case 0: return .detached
-        case 1: return .one(clients[0])
-        default: return .multiple
+    /// THE client resolution rule (replaces the former `chooseClient` +
+    /// `chooseLocalClient` pair — one rule, no parallel paths). Behavior-preserving vs
+    /// the old inline reveal() flow:
+    ///  - 0 clients → `.detached`;
+    ///  - exactly 1 → `.one` WITHOUT local filtering (matches today's reveal(), which
+    ///    only filtered on the multiple case — a lone client is revealed as-is);
+    ///  - 2+ → the remote-attach filter: a mosh/ssh-hosted client cannot be revealed
+    ///    by a local app, so dropping it is logic, not preference (the recurring
+    ///    real-world case: a forgotten remote attach sharing the session with the real
+    ///    terminal tab). Exactly one local survivor → `.one`; two+ locals →
+    ///    `.multiple` (genuine ambiguity, never guess); zero locals → `.remoteOnly`
+    ///    (nothing local to reveal — name the invisible culprit).
+    static func resolveClients(_ classified: [(client: Client, locallyHosted: Bool)]) -> ClientResolution {
+        switch classified.count {
+        case 0:
+            return .detached
+        case 1:
+            return .one(classified[0].client)
+        default:
+            let locals = classified.filter { $0.locallyHosted }.map { $0.client }
+            switch locals.count {
+            case 0: return .remoteOnly
+            case 1: return .one(locals[0])
+            default: return .multiple
+            }
         }
     }
 
-    /// PURE: among MULTIPLE attached clients, keep only the locally-hosted ones — a
-    /// mosh/ssh-hosted client cannot be revealed by a local app, so dropping it is
-    /// logic, not preference (the recurring real-world case: a forgotten remote attach
-    /// sharing the session with the real terminal tab). Exactly one local survivor →
-    /// `.one` (full precision proceeds); two+ locals → `.multiple` (genuine ambiguity,
-    /// never guess); zero locals → `.detached` (nothing local to reveal).
-    static func chooseLocalClient(_ classified: [(client: Client, locallyHosted: Bool)]) -> ClientChoice {
-        return chooseClient(classified.filter { $0.locallyHosted }.map { $0.client })
+    /// PURE: parse `display-message -p '#{window_active}#{pane_active}'` output.
+    /// Trimmed output == "11" (the pane's window is the session's current window AND
+    /// the pane is that window's active pane) → true; EVERYTHING else — empty, "10",
+    /// "01", "0", garbage — → false (fail toward not-focused → post).
+    static func parseActiveFlags(_ output: String) -> Bool {
+        return output.trimmingCharacters(in: .whitespacesAndNewlines) == "11"
     }
 
     /// Trim surrounding whitespace/newlines (the `-F` output carries a trailing newline,

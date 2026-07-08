@@ -2,7 +2,7 @@
 
 > **Context:** The blocking Approve/Deny flow. pesterm posts a notification, **waits** for a human tap (up to 120s), writes the decision Claude reads, and exits.
 > **Parent Guide:** [Project Root](../../../CLAUDE.md)
-> **See Also:** [Adapters](../Adapters/CLAUDE.md) · [Notifications backend](../Notifications/UNUserNotificationBackend.swift) · [DESIGN.md §11a](../../../DESIGN.md)
+> **See Also:** [Adapters](../Adapters/CLAUDE.md) · [Notifications backend](../Notifications/UNUserNotificationBackend.swift) · [DESIGN.md §11a](../../../DESIGN.md) · [DESIGN.md §11b (focus deferral)](../../../DESIGN.md)
 
 ## Quick Reference
 
@@ -25,6 +25,16 @@ Approve/Deny tap      body/default click       card gone (dismissed or consumed 
 
 The pure helpers live here; the delegate methods that call them live in
 `Notifications/UNUserNotificationBackend.swift`. Read both together.
+
+### Pre-post focus gate (focus deferral — DESIGN.md §11b)
+
+BEFORE `post()` ever runs, `main.swift`'s adapter path checks whether the asking
+terminal session is **provably frontmost** (`FocusPolicy` + the revealer's
+`probeFocus`). A hard YES skips this entire flow: detached sound, stderr diagnostic,
+**zero stdout bytes**, `exit 0` → Claude prompts in the terminal instantly (the same
+emit-nothing fallback contract as the 120s timeout — never an auto-allow). Anything
+less than a hard YES posts, and everything on this page runs UNCHANGED — the 120s
+blocking flow is untouched once posting happens.
 
 ## Structure
 

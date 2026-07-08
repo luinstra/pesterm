@@ -130,3 +130,38 @@ BOOL pesterm_ghostty_focus_terminal(NSString *windowId, NSString *tabId,
 
     return NO;
 }
+
+/*
+ * pesterm_ghostty_focused_terminal_cwd — read-only focus probe (see header). Nil-safe
+ * at every hop: missing app/window/tab/terminal/cwd yields nil, never a crash. An
+ * empty-string cwd (shell integration not reporting) is returned as-is — the Swift
+ * caller's empty-match guard rejects it. NO activate/select/focus calls.
+ */
+NSString * _Nullable pesterm_ghostty_focused_terminal_cwd(NSString *bundleID) {
+    if (bundleID == nil) {
+        return nil;
+    }
+
+    GhosttyApplication *app =
+        (GhosttyApplication *)[SBApplication applicationWithBundleIdentifier:bundleID];
+    if (app == nil) {
+        return nil;
+    }
+
+    GhosttyWindow *window = app.frontWindow;
+    if (window == nil) {
+        return nil;
+    }
+
+    GhosttyTab *tab = window.selectedTab;
+    if (tab == nil) {
+        return nil;
+    }
+
+    GhosttyTerminal *terminal = tab.focusedTerminal;
+    if (terminal == nil) {
+        return nil;
+    }
+
+    return pesterm_ghostty_string(terminal.workingDirectory);
+}

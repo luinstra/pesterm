@@ -180,4 +180,44 @@ final class GhosttyEnvTests: XCTestCase {
         XCTAssertTrue(s.contains("/proj"))
         XCTAssertTrue(s.hasSuffix("revealed app only"))
     }
+
+    // MARK: focusedCwdMatches (focus probe) — mirrors chooseTerminal's two-pass compare
+
+    func testFocusedCwdMatchesExact() {
+        XCTAssertTrue(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj",
+                                                   focused: "/Users/me/proj"))
+    }
+
+    func testFocusedCwdMatchesTrailingSlash() {
+        XCTAssertTrue(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj/",
+                                                   focused: "/Users/me/proj"))
+        XCTAssertTrue(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj",
+                                                   focused: "/Users/me/proj/"))
+    }
+
+    func testFocusedCwdMatchesSymlinkResolvedRetry() {
+        // $PWD is the shell's LOGICAL path; `working directory` may be physical.
+        XCTAssertTrue(GhosttyEnv.focusedCwdMatches(captured: "/tmp",
+                                                   focused: "/private/tmp"))
+        XCTAssertTrue(GhosttyEnv.focusedCwdMatches(captured: "/private/tmp",
+                                                   focused: "/tmp"))
+    }
+
+    func testFocusedCwdMatchesRejectsNilEmptyWhitespaceFocused() {
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj", focused: nil))
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj", focused: ""))
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj", focused: "  \n"))
+    }
+
+    func testFocusedCwdMatchesRejectsEmptyCaptured() {
+        // The empty-match guard: an absent match key must never pair with a terminal
+        // reporting an empty working directory.
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "", focused: ""))
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "  ", focused: "/x"))
+    }
+
+    func testFocusedCwdMatchesMismatch() {
+        XCTAssertFalse(GhosttyEnv.focusedCwdMatches(captured: "/Users/me/proj",
+                                                    focused: "/Users/me/other"))
+    }
 }
