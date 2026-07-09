@@ -2,6 +2,17 @@
  * iTermBridge.h
  */
 
+// The pesterm_* probe declarations below carry honest `_Nullable` returns — the only
+// nullability annotations in this file — which flips clang's completeness audit ON for
+// EVERY generated pointer in the header (-Wnullability-completeness). Silence it here,
+// in the header itself: this is the one place every clang parse is guaranteed to see —
+// the C-target compile AND Swift's ClangImporter module build (Package.swift cSettings
+// do NOT reach the importer; some toolchains warn there). No matching `pop` on purpose:
+// only our own bridge .m includes this directly.
+// REGEN NOTE: scripts/verify-sdef.sh blind-cp's this whole file — re-apply this pragma
+// with the pesterm_* additions (a fresh build will warn loudly if it goes missing).
+#pragma clang diagnostic ignored "-Wnullability-completeness"
+
 #import <AppKit/AppKit.h>
 #import <ScriptingBridge/ScriptingBridge.h>
 

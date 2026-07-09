@@ -20,9 +20,10 @@ let package = Package(
             publicHeadersPath: "include",
             // The pesterm-added probe functions carry honest `_Nullable` returns, which
             // makes clang demand nullability on EVERY pointer in the header
-            // (-Wnullability-completeness). The rest of the header is a generated sdef
-            // mirror we don't annotate (and regen would clobber in-header pragmas —
-            // verify-sdef.sh blind-cp's), so the audit is silenced HERE, regen-proof.
+            // (-Wnullability-completeness). PRIMARY suppression is the in-header pragma
+            // (the only thing Swift's ClangImporter also parses — these flags don't reach
+            // it); this flag is the regen-proof backstop for the C-target compile, since
+            // verify-sdef.sh's blind cp clobbers the in-header pragma.
             cSettings: [
                 .unsafeFlags(["-Wno-nullability-completeness"])
             ]
@@ -33,7 +34,8 @@ let package = Package(
             name: "CGhosttyBridge",
             path: "Sources/CGhosttyBridge",
             publicHeadersPath: "include",
-            // Same rationale as CITermBridge: generated header + one _Nullable addition.
+            // Same rationale as CITermBridge: in-header pragma is primary (reaches the
+            // ClangImporter); this flag backstops the C compile across regenerations.
             cSettings: [
                 .unsafeFlags(["-Wno-nullability-completeness"])
             ]

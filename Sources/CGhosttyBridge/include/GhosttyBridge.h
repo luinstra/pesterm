@@ -6,7 +6,17 @@
  * appended at the end — the same one-header vendored layout as CITermBridge.
  * Regenerate the GENERATED portion with scripts/verify-ghostty-sdef.sh, which
  * preserves everything after the "pesterm additions" marker below.
+ *
+ * REGEN NOTE: the pragma right below this comment is ABOVE the marker, so a
+ * regeneration drops it — re-apply it (a fresh build warns loudly if missing).
  */
+
+// The pesterm_ghostty_focused_terminal_cwd `_Nullable` return is the only nullability
+// annotation in this file, which flips clang's completeness audit ON for every generated
+// pointer (-Wnullability-completeness). Silenced in the header itself so EVERY parse sees
+// it — the C-target compile AND Swift's ClangImporter module build (Package.swift
+// cSettings do not reach the importer; some toolchains warn there).
+#pragma clang diagnostic ignored "-Wnullability-completeness"
 
 #import <AppKit/AppKit.h>
 #import <ScriptingBridge/ScriptingBridge.h>
